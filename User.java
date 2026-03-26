@@ -1,7 +1,33 @@
 public class User {
-    public String name;
-    public String email;
-    public String phone;
-    public String address;
-    public String password;
+    private String email;
+    private String username;
+
+
+    public User(String email) {
+        this.email = email;
+        this.username = username;
+    }
+
+    private String generateUsername(String email) {
+        if (email != null && email.contains("@")) {
+            return email.split("@")[0];
+        }
+        return "UnknownUser";
+    }
+    
+
+    public String getEmail() {
+        return email;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    @Override
+    public String toString() {
+        return toString() {
+            return String.format("| %-20s | %-15s |", email, username);
+        }
 }
+

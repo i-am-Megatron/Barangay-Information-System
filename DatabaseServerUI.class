@@ -1,0 +1,151 @@
+// Source code is decompiled from a .class file using FernFlower decompiler (from Intellij IDEA).
+import java.awt.BorderLayout;
+import java.awt.Button;
+import java.awt.Color;
+import java.awt.Frame;
+import java.awt.TextArea;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.util.Objects;
+
+public class DatabaseServerUI extends Frame {
+   private TextArea logArea;
+   private Button startButton;
+   private boolean isRunning = false;
+   private ServerSocket serverSocket;
+
+   public DatabaseServerUI() {
+      this.setTitle("Database Server Control Panel");
+      this.setSize(500, 400);
+      this.setLayout(new BorderLayout(10, 10));
+      this.logArea = new TextArea();
+      this.logArea.setEditable(false);
+      this.logArea.setBackground(Color.BLACK);
+      this.logArea.setForeground(Color.GREEN);
+      this.add(this.logArea, "Center");
+      this.startButton = new Button("Start Server");
+      this.add(this.startButton, "South");
+      this.addWindowListener(new WindowAdapter() {
+         {
+            Objects.requireNonNull(DatabaseServerUI.this);
+         }
+
+         public void windowClosing(WindowEvent var1) {
+            DatabaseServerUI.this.stopServer();
+            System.exit(0);
+         }
+      });
+      this.startButton.addActionListener((var1) -> this.toggleServer());
+      this.setVisible(true);
+   }
+
+   private void toggleServer() {
+      if (!this.isRunning) {
+         (new Thread(this::startServer)).start();
+         this.startButton.setLabel("Stop Server");
+      } else {
+         this.stopServer();
+         this.startButton.setLabel("Start Server");
+      }
+
+   }
+
+   public void startServer() {
+      try {
+         this.serverSocket = new ServerSocket(6060);
+         this.isRunning = true;
+         this.logArea.append("[INFO] Server started on port 6060...\n");
+
+         while(this.isRunning) {
+            Socket var1 = this.serverSocket.accept();
+            (new Thread(() -> this.handleClient(var1))).start();
+         }
+      } catch (IOException var2) {
+         if (this.isRunning) {
+            this.logArea.append("[ERROR] " + var2.getMessage() + "\n");
+         }
+      }
+
+   }
+
+   private void stopServer() {
+      this.isRunning = false;
+
+      try {
+         if (this.serverSocket != null) {
+            this.serverSocket.close();
+         }
+
+         this.logArea.append("[INFO] Server stopped.\n");
+      } catch (IOException var2) {
+         var2.printStackTrace();
+      }
+
+   }
+
+   private void handleClient(Socket var1) {
+      String var2 = var1.getInetAddress().toString();
+      this.logArea.append("[CONN] Client connected: " + var2 + "\n");
+
+      try {
+         BufferedReader var3 = new BufferedReader(new InputStreamReader(var1.getInputStream()));
+
+         try {
+            PrintWriter var4 = new PrintWriter(var1.getOutputStream(), true);
+
+            String var5;
+            try {
+               while((var5 = var3.readLine()) != null) {
+                  this.logArea.append("[QUERY] " + var2 + ": " + var5 + "\n");
+                  if (var5.equalsIgnoreCase("exit")) {
+                     this.logArea.append("[DISC] Client requested exit.\n");
+                     break;
+                  }
+
+                  String var6 = "Processed: " + var5.toUpperCase();
+                  var4.println(var6);
+               }
+            } catch (Throwable var21) {
+               try {
+                  var4.close();
+               } catch (Throwable var20) {
+                  var21.addSuppressed(var20);
+               }
+
+               throw var21;
+            }
+
+            var4.close();
+         } catch (Throwable var22) {
+            try {
+               var3.close();
+            } catch (Throwable var19) {
+               var22.addSuppressed(var19);
+            }
+
+            throw var22;
+         }
+
+         var3.close();
+      } catch (IOException var23) {
+         this.logArea.append("[ERR] Client session closed unexpectedly.\n");
+      } finally {
+         try {
+            var1.close();
+         } catch (IOException var18) {
+         }
+
+      }
+
+   }
+
+   public static void main(String[] var0) {
+      new DatabaseServerUI();
+   }
+}
