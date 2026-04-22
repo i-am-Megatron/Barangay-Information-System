@@ -23,10 +23,3 @@ public class UserTable {
     }
     
 }
-
-public static void main(String[] args) {
-    UserTable userTable = new UserTable();
-    userTable.addUser(new User("john.doe@example.com"));
-    userTable.addUser(new User("jane.smith@example.com"));
-    userTable.displayTable();
-}

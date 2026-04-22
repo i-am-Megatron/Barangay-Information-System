@@ -5,7 +5,7 @@ public class User {
 
     public User(String email) {
         this.email = email;
-        this.username = username;
+        this.username = generateUsername(email);
     }
 
     private String generateUsername(String email) {
@@ -26,8 +26,7 @@ public class User {
 
     @Override
     public String toString() {
-        return toString() {
-            return String.format("| %-20s | %-15s |", email, username);
-        }
+        return String.format("| %-20s | %-15s |", email, username);
+    }
 }
 

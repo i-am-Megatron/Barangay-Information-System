@@ -5,11 +5,11 @@ import java.net.*;
 import java.util.ArrayList;
 
 // 1. Data Model
-class User {
+class AwtUser {
     private String email;
     private String username;
 
-    public User(String email) {
+    public AwtUser(String email) {
         this.email = email;
         this.username = generateUsername(email);
     }
@@ -30,42 +30,42 @@ class User {
 }
 
 // 2. Logic & GUI Component Combined
-// Changed to extend 'List' so it can be added to the Frame
-class UserTable extends List {
-    private java.util.List<User> users = new ArrayList<>();
+class AwtUserTable extends java.awt.List {
+    // Renamed to 'userList' to avoid conflict with 'java.awt.List'
+    private java.util.List<AwtUser> userList = new ArrayList<>();
 
-    public void addUser(User user) {
-        users.add(user);
-        this.add(user.toString()); // Adds to the visual AWT List
+    public void addUser(AwtUser user) {
+        userList.add(user);
+        this.add(user.toString()); // Adds string representation to visual AWT List
     }
 
     public void removeUser(int index) {
-        if (index >= 0 && index < users.size()) {
-            users.remove(index);
-            this.remove(index); // Removes from the visual AWT List
+        if (index >= 0 && index < userList.size()) {
+            userList.remove(index);
+            this.remove(index); // Removes from visual AWT List
         }
     }
 
     public int getUserCount() {
-        return users.size();
+        return userList.size();
     }
 }
 
-class DatabaseTable extends UserTable { }
+class AwtDatabaseTable extends AwtUserTable { }
 
 // 3. The Management UI
-class UserInterface extends Frame {
-    private DatabaseTable databaseTable;
+class AwtUserInterface extends Frame {
+    private AwtDatabaseTable databaseTable;
     private TextField emailField;
     private Button addButton, removeButton;
     private Label statusLabel;
 
-    public UserInterface() {
+    public AwtUserInterface() {
         setTitle("User Management System");
-        setSize(400, 400);
+        setSize(450, 400);
         setLayout(new BorderLayout(10, 10));
 
-        databaseTable = new DatabaseTable();
+        databaseTable = new AwtDatabaseTable();
         
         // Input panel
         Panel inputPanel = new Panel(new FlowLayout());
@@ -81,7 +81,7 @@ class UserInterface extends Frame {
         statusLabel = new Label("Ready", Label.CENTER);
 
         add(inputPanel, BorderLayout.NORTH);
-        add(databaseTable, BorderLayout.CENTER); // Now works because DatabaseTable is a List
+        add(databaseTable, BorderLayout.CENTER); 
         add(statusLabel, BorderLayout.SOUTH);
 
         addButton.addActionListener(e -> addUser());
@@ -92,13 +92,13 @@ class UserInterface extends Frame {
         });
 
         setVisible(true);
-        setLocation(550, 0); // Offset from the Server window
+        setLocation(550, 100); 
     }
 
     private void addUser() {
         String email = emailField.getText().trim();
         if (!email.isEmpty() && email.contains("@")) {
-            User newUser = new User(email);
+            AwtUser newUser = new AwtUser(email);
             databaseTable.addUser(newUser);
             emailField.setText("");
             statusLabel.setText("Added: " + newUser.getUsername());
@@ -112,6 +112,8 @@ class UserInterface extends Frame {
         if (count > 0) {
             databaseTable.removeUser(count - 1);
             statusLabel.setText("Removed last user");
+        } else {
+            statusLabel.setText("No users to remove");
         }
     }
 }
@@ -120,7 +122,7 @@ class UserInterface extends Frame {
 public class CombinedInfoSystem extends Frame {
     private TextArea logArea;
     private Button startButton, openClientButton;
-    private boolean isRunning = false;
+    private volatile boolean isRunning = false;
     private ServerSocket serverSocket;
 
     public CombinedInfoSystem() {
@@ -132,9 +134,10 @@ public class CombinedInfoSystem extends Frame {
         logArea.setEditable(false);
         logArea.setBackground(Color.BLACK);
         logArea.setForeground(Color.GREEN);
+        logArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
         add(logArea, BorderLayout.CENTER);
 
-        Panel bottomPanel = new Panel(new GridLayout(1, 2));
+        Panel bottomPanel = new Panel(new GridLayout(1, 2, 5, 5));
         startButton = new Button("Start Server");
         openClientButton = new Button("Open User Manager");
         bottomPanel.add(startButton);
@@ -142,7 +145,7 @@ public class CombinedInfoSystem extends Frame {
         add(bottomPanel, BorderLayout.SOUTH);
 
         startButton.addActionListener(e -> toggleServer());
-        openClientButton.addActionListener(e -> new UserInterface());
+        openClientButton.addActionListener(e -> new AwtUserInterface());
 
         addWindowListener(new WindowAdapter() {
             public void windowClosing(WindowEvent e) {
@@ -152,12 +155,14 @@ public class CombinedInfoSystem extends Frame {
         });
 
         setVisible(true);
+        setLocation(50, 100);
     }
 
     private void toggleServer() {
         if (!isRunning) {
-            new Thread(this::startServer).start();
+            isRunning = true;
             startButton.setLabel("Stop Server");
+            new Thread(this::startServer).start();
         } else {
             stopServer();
             startButton.setLabel("Start Server");
@@ -167,38 +172,49 @@ public class CombinedInfoSystem extends Frame {
     public void startServer() {
         try {
             serverSocket = new ServerSocket(6060);
-            isRunning = true;
             logArea.append("[INFO] Server started on port 6060...\n");
 
             while (isRunning) {
-                Socket clientSocket = serverSocket.accept();
-                new Thread(() -> handleClient(clientSocket)).start();
+                try {
+                    Socket clientSocket = serverSocket.accept();
+                    new Thread(() -> handleClient(clientSocket)).start();
+                } catch (IOException e) {
+                    if (isRunning) logArea.append("[ERROR] Accept failed: " + e.getMessage() + "\n");
+                }
             }
         } catch (IOException e) {
-            if (isRunning) logArea.append("[ERROR] " + e.getMessage() + "\n");
+            logArea.append("[ERROR] Could not listen on port 6060.\n");
         }
     }
 
     private void stopServer() {
         isRunning = false;
         try {
-            if (serverSocket != null) serverSocket.close();
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
+            }
             logArea.append("[INFO] Server stopped.\n");
-        } catch (IOException e) { e.printStackTrace(); }
+        } catch (IOException e) {
+            logArea.append("[ERR] Error closing server: " + e.getMessage() + "\n");
+        }
     }
 
     private void handleClient(Socket socket) {
         String clientAddr = socket.getInetAddress().toString();
         logArea.append("[CONN] Client connected: " + clientAddr + "\n");
-        try (BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-             PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
+        try (
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            PrintWriter out = new PrintWriter(socket.getOutputStream(), true)
+        ) {
             String query;
             while ((query = in.readLine()) != null) {
                 logArea.append("[QUERY] " + query + "\n");
                 out.println("Processed: " + query.toUpperCase());
             }
         } catch (IOException e) {
-            logArea.append("[ERR] Session closed.\n");
+            logArea.append("[ERR] Session closed for: " + clientAddr + "\n");
+        } finally {
+            try { socket.close(); } catch (IOException e) { /* Ignore */ }
         }
     }
 

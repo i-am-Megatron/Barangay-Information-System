@@ -1,10 +1,143 @@
 import java.awt.*;
 import java.awt.event.*;
-import java.io.File;
+import java.awt.image.BufferedImage;
+import java.awt.print.*;
 import java.util.ArrayList;
 import java.util.List;
 import javax.swing.JOptionPane;
 import javax.swing.Timer;
+// 0. Barcode Generator (Code 128 subset B)
+class BarcodeGenerator {
+    // Code 128B encoding: each value maps to 11-bit bar pattern
+    private static final int[] CODE128B = {
+        0b11011001100, 0b11001101100, 0b11001100110, 0b10010011000, 0b10010001100,
+        0b10001001100, 0b10011001000, 0b10011000100, 0b10001100100, 0b11001001000,
+        0b11001000100, 0b11000100100, 0b10110011100, 0b10011011100, 0b10011001110,
+        0b10111001100, 0b10011101100, 0b10011100110, 0b11001110010, 0b11001011100,
+        0b11001001110, 0b11011100100, 0b11001110100, 0b11101101110, 0b11101001100,
+        0b11100101100, 0b11100100110, 0b11101100100, 0b11100110100, 0b11100110010,
+        0b11011011000, 0b11011000110, 0b11000110110, 0b10100011000, 0b10001011000,
+        0b10001000110, 0b10110001000, 0b10001101000, 0b10001100010, 0b11010001000,
+        0b11000101000, 0b11000100010, 0b10110111000, 0b10110001110, 0b10001101110,
+        0b10111011000, 0b10111000110, 0b10001110110, 0b11101110110, 0b11010001110,
+        0b11000101110, 0b11011101000, 0b11011100010, 0b11011101110, 0b11101011000,
+        0b11101000110, 0b11100010110, 0b11101101000, 0b11101100010, 0b11100011010,
+        0b11101111010, 0b11001000010, 0b11110001010, 0b10100110000, 0b10100001100,
+        0b10010110000, 0b10010000110, 0b10000101100, 0b10000100110, 0b10110010000,
+        0b10110000100, 0b10011010000, 0b10011000010, 0b10000110100, 0b10000110010,
+        0b11000010010, 0b11001010000, 0b11110111010, 0b11000010100, 0b10001111010,
+        0b10100111100, 0b10010111100, 0b10010011110, 0b10111100100, 0b10011110100,
+        0b10011110010, 0b11110100100, 0b11110010100, 0b11110010010, 0b11011011110,
+        0b11011110110, 0b11110110110, 0b10101111000, 0b10100011110, 0b10001011110,
+        0b10111101000, 0b10111100010, 0b11110101000, 0b11110100010, 0b10111011110,
+        0b10111101110, 0b11101011110, 0b11110101110, 0b11010000100, 0b11010010000,
+        0b11010011100, 0b11000111010
+    };
+    private static final int START_B = 104;
+    private static final int STOP   = 106;
+    private static final int STOP_PATTERN = 0b11000111010;
+    private static final int STOP_TERM    = 0b11;
+
+    public static BufferedImage generate(String text, int barWidth, int height) {
+        int[] values = encode(text);
+        // count total modules
+        int modules = 0;
+        for (int v : values) modules += 11;
+        modules += 2; // stop terminator
+        int imgWidth = modules * barWidth + 20;
+        BufferedImage img = new BufferedImage(imgWidth, height + 30, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = img.createGraphics();
+        g.setColor(Color.WHITE);
+        g.fillRect(0, 0, imgWidth, height + 30);
+        g.setColor(Color.BLACK);
+        int x = 10;
+        for (int vi = 0; vi < values.length; vi++) {
+            int pattern = (vi < values.length - 1) ? CODE128B[values[vi]] : STOP_PATTERN;
+            for (int bit = 10; bit >= 0; bit--) {
+                if (((pattern >> bit) & 1) == 1) g.fillRect(x, 5, barWidth, height);
+                x += barWidth;
+            }
+        }
+        // stop terminator (2 modules)
+        for (int bit = 1; bit >= 0; bit--) {
+            if (((STOP_TERM >> bit) & 1) == 1) g.fillRect(x, 5, barWidth, height);
+            x += barWidth;
+        }
+        // draw text below
+        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        FontMetrics fm = g.getFontMetrics();
+        int tx = (imgWidth - fm.stringWidth(text)) / 2;
+        g.drawString(text, tx, height + 22);
+        g.dispose();
+        return img;
+    }
+
+    private static int[] encode(String text) {
+        if (text == null || text.isEmpty()) text = "EMPTY";
+        int[] vals = new int[2 + text.length() + 1];
+        vals[0] = START_B;
+        int checksum = START_B;
+        for (int i = 0; i < text.length(); i++) {
+            int v = Math.max(0, Math.min(95, text.charAt(i) - 32));
+            vals[1 + i] = v;
+            checksum += v * (i + 1);
+        }
+        vals[1 + text.length()] = checksum % 103;
+        vals[2 + text.length()] = STOP;
+        return vals;
+    }
+
+    public static void showBarcodeWindow(java.awt.Component parent, String data, String label) {
+        BufferedImage img = generate(data, 2, 80);
+        Frame f = new Frame("Barcode: " + label);
+        f.setLayout(new BorderLayout(10, 10));
+        f.setBackground(Color.WHITE);
+
+        Canvas canvas = new Canvas() {
+            public void paint(Graphics g) {
+                g.drawImage(img, 0, 0, this);
+            }
+            public Dimension getPreferredSize() {
+                return new Dimension(img.getWidth(), img.getHeight());
+            }
+        };
+
+        Label infoLabel = new Label(label, Label.CENTER);
+        infoLabel.setFont(new Font("Segoe UI", Font.BOLD, 13));
+
+        Panel btnPanel = new Panel(new FlowLayout(FlowLayout.CENTER, 10, 5));
+        Button printBtn = new Button("🖨️ Print");
+        Button closeBtn = new Button("Close");
+        btnPanel.add(printBtn);
+        btnPanel.add(closeBtn);
+
+        printBtn.addActionListener(e -> {
+            PrinterJob job = PrinterJob.getPrinterJob();
+            job.setPrintable((graphics, pageFormat, pageIndex) -> {
+                if (pageIndex > 0) return Printable.NO_SUCH_PAGE;
+                graphics.drawImage(img, (int) pageFormat.getImageableX(),
+                    (int) pageFormat.getImageableY(), null);
+                return Printable.PAGE_EXISTS;
+            });
+            if (job.printDialog()) {
+                try { job.print(); } catch (PrinterException ex) {
+                    JOptionPane.showMessageDialog(f, "Print error: " + ex.getMessage());
+                }
+            }
+        });
+        closeBtn.addActionListener(e -> f.dispose());
+
+        f.add(infoLabel, BorderLayout.NORTH);
+        f.add(canvas, BorderLayout.CENTER);
+        f.add(btnPanel, BorderLayout.SOUTH);
+        f.pack();
+        f.setLocationRelativeTo(parent);
+        f.addWindowListener(new WindowAdapter() {
+            public void windowClosing(WindowEvent e) { f.dispose(); }
+        });
+        f.setVisible(true);
+    }
+}
 
 // 1. Resident Data Model
 class Resident {
@@ -275,6 +408,8 @@ class Announcement {
     private String postedBy;
     private String status;
     private int viewCount;
+    private int reportCount;
+    private java.util.List<String> reportReasons;
     private java.util.List<String> targetAudience;
 
     public Announcement(String title, String message, String category, String priority, String postedBy) {
@@ -288,6 +423,8 @@ class Announcement {
         this.postedBy = postedBy;
         this.status = "Active";
         this.viewCount = 0;
+        this.reportCount = 0;
+        this.reportReasons = new java.util.ArrayList<>();
         this.targetAudience = new java.util.ArrayList<>();
         targetAudience.add("All Residents");
     }
@@ -318,6 +455,15 @@ class Announcement {
 
     public void setStatus(String status) { this.status = status; }
     public void addTargetAudience(String audience) { targetAudience.add(audience); }
+    public void addReport(String reportReason) {
+        reportCount++;
+        reportReasons.add(reportReason);
+        if ("Active" .equals(status) || "Flagged".equals(status)) {
+            this.status = "Flagged";
+        }
+    }
+    public int getReportCount() { return reportCount; }
+    public java.util.List<String> getReportReasons() { return reportReasons; }
 
     @Override
     public String toString() {
@@ -325,6 +471,7 @@ class Announcement {
                            id, title, category, priority, postDate, viewCount);
     }
 }
+
 
 class SystemUser {
     private long id;
@@ -352,6 +499,25 @@ class SystemUser {
         this.passwordHash = "";
         this.permissions = new java.util.ArrayList<>();
         initializePermissions();
+    }
+
+    public SystemUser(long id, String name, String email, String role, String barcodeId,
+                      String department, boolean isActive, String lastLogin, String createdDate,
+                      String passwordHash, java.util.List<String> permissions) {
+        this.id = id;
+        this.name = name;
+        this.email = email;
+        this.role = role;
+        this.barcodeId = barcodeId;
+        this.department = department != null ? department : "General";
+        this.isActive = isActive;
+        this.lastLogin = lastLogin != null ? lastLogin : "";
+        this.createdDate = createdDate != null ? createdDate : new java.text.SimpleDateFormat("MM/dd/yyyy").format(new java.util.Date());
+        this.passwordHash = passwordHash != null ? passwordHash : "";
+        this.permissions = permissions != null ? new java.util.ArrayList<>(permissions) : new java.util.ArrayList<>();
+        if (this.permissions.isEmpty()) {
+            initializePermissions();
+        }
     }
 
     private void initializePermissions() {
@@ -403,10 +569,24 @@ class SystemUser {
     public boolean isActive() { return isActive; }
     public String getLastLogin() { return lastLogin; }
     public String getCreatedDate() { return createdDate; }
+    public String getPasswordHash() { return passwordHash; }
     public java.util.List<String> getPermissions() { return permissions; }
 
     public void setDepartment(String department) { this.department = department; }
     public void setActive(boolean active) { this.isActive = active; }
+    public void setName(String name) { this.name = name; }
+    public void setEmail(String email) { this.email = email; }
+    public void setRole(String role) { this.role = role; initializePermissions(); }
+    public void setBarcodeId(String barcodeId) { this.barcodeId = barcodeId; }
+    public void setLastLogin(String lastLogin) { this.lastLogin = lastLogin; }
+    public void setCreatedDate(String createdDate) { this.createdDate = createdDate; }
+    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
+    public void setPermissions(java.util.List<String> permissions) {
+        this.permissions = new java.util.ArrayList<>();
+        if (permissions != null) {
+            this.permissions.addAll(permissions);
+        }
+    }
 
     @Override
     public String toString() {
@@ -420,8 +600,8 @@ class ResidentTable extends java.awt.List {
     private List<Resident> residents = new ArrayList<>();
 
     public ResidentTable() {
-        setBackground(new Color(255, 255, 255));
-        setForeground(new Color(33, 37, 41));
+        setBackground(new Color(245, 252, 245)); // FORM_BACKGROUND
+        setForeground(new Color(25, 111, 61));   // TEXT_COLOR
         setFont(new Font("Segoe UI", Font.PLAIN, 12));
     }
 
@@ -456,13 +636,10 @@ public class BarangayInfoSys extends Frame {
     private ResidentTable residentListUI;
     private TextField firstNameField, lastNameField, middleNameField, addressField, contactField, birthDateField, searchField, occupationField, emailField, emergencyNameField, emergencyNumberField, ageField, householdIdField;
     private Choice genderChoice, civilStatusChoice;
-    private Button addButton, removeButton, searchButton, refreshButton, clearButton, saveButton, saveAndOpenButton;
-    private Button certificationsButton, complaintButton, financeButton, announcementButton, userMgmtButton;
+    private Button addButton, removeButton, searchButton, refreshButton, clearButton, exportExcelButton, barcodeButton;
+    private Button certificationsButton, complaintButton, financeButton, announcementButton, userMgmtButton, reportButton;
     private Label statusLabel, titleLabel;
     private Panel mainPanel;
-
-    private AccessDatabaseManager dbManager;
-    private final String databasePath = new File(System.getProperty("user.dir"), "barangay.accdb").getAbsolutePath();
 
     // Data stores for additional modules
     private java.util.List<Certificate> certificates = new ArrayList<>();
@@ -470,18 +647,22 @@ public class BarangayInfoSys extends Frame {
     private java.util.List<PaymentRecord> payments = new ArrayList<>();
     private java.util.List<Announcement> announcements = new ArrayList<>();
     private java.util.List<SystemUser> systemUsers = new ArrayList<>();
+    private SQLiteDatabaseManager dbManager;
     private SystemUser currentUser;
 
-    // Modern color scheme
-    private final Color PRIMARY_COLOR = new Color(128, 128, 128);    // Gray
-    private final Color SECONDARY_COLOR = new Color(192, 192, 192);  // Light Gray
-    private final Color ACCENT_COLOR = new Color(64, 64, 64);     // Dark Gray
-    private final Color DANGER_COLOR = new Color(96, 96, 96);      // Medium Dark Gray
-    private final Color SUCCESS_COLOR = new Color(34, 139, 34);    // Green
-    private final Color INFO_COLOR = new Color(70, 130, 180);      // Steel Blue
-    private final Color BACKGROUND_COLOR = new Color(248, 249, 250); // Light gray
-    private final Color CARD_COLOR = new Color(255, 255, 255);      // White
-    private final Color TEXT_COLOR = new Color(33, 37, 41);         // Dark gray
+    // Barangay Green Theme - Professional and appropriate for government system
+    private final Color PRIMARY_COLOR = new Color(34, 139, 34);      // Forest Green
+    private final Color SECONDARY_COLOR = new Color(46, 204, 113);   // Emerald Green
+    private final Color ACCENT_COLOR = new Color(25, 111, 61);       // Dark Green
+    private final Color DANGER_COLOR = new Color(231, 76, 60);       // Modern Red
+    private final Color SUCCESS_COLOR = new Color(46, 204, 113);     // Modern Green
+    private final Color INFO_COLOR = new Color(52, 152, 219);        // Modern Blue
+    private final Color BACKGROUND_COLOR = new Color(240, 248, 240); // Light Green Tint
+    private final Color CARD_COLOR = new Color(255, 255, 255);       // White
+    private final Color FORM_BACKGROUND = new Color(245, 252, 245);  // Very Light Green for forms
+    private final Color TEXT_COLOR = new Color(25, 111, 61);         // Dark Green
+    private final Color MODERN_BG_START = new Color(240, 248, 240);  // Light Green
+    private final Color MODERN_BG_END = new Color(255, 255, 255);    // White
 
     private Font titleFont = new Font("Segoe UI", Font.BOLD, 18);
     private Font labelFont = new Font("Segoe UI", Font.PLAIN, 12);
@@ -507,26 +688,80 @@ public class BarangayInfoSys extends Frame {
             JOptionPane.WARNING_MESSAGE);
     }
 
+    private SystemUser findUserByEmail(String email) {
+        if (email == null) {
+            return null;
+        }
+        for (SystemUser user : systemUsers) {
+            if (email.equalsIgnoreCase(user.getEmail())) {
+                return user;
+            }
+        }
+        return null;
+    }
+
     public BarangayInfoSys() {
         this(new SystemUser("Admin", "admin@barangay.local", "Administrator", "ADMIN12345"));
     }
 
     public BarangayInfoSys(SystemUser user) {
+        this.dbManager = new SQLiteDatabaseManager(new java.io.File("BarangayInfoSys.db").getAbsolutePath());
+        this.systemUsers = dbManager.loadSystemUsers();
         this.currentUser = user;
-        this.systemUsers.add(user);
-        // Update last login
+
         if (currentUser != null) {
             currentUser.updateLastLogin();
+            if (findUserByEmail(currentUser.getEmail()) == null) {
+                systemUsers.add(currentUser);
+                dbManager.saveSystemUser(currentUser);
+            }
         }
+
+        // If there are no users in the database yet, create the default admin user.
+        if (systemUsers.isEmpty()) {
+            systemUsers.add(currentUser);
+            dbManager.saveSystemUser(currentUser);
+        }
+
+        // Add sample announcements for demonstration
+        initializeSampleAnnouncements();
+
         initializeUI();
-        setupDatabase();
         setupEventHandlers();
         setVisible(true);
     }
 
+    private void initializeSampleAnnouncements() {
+        // Add sample announcements for demonstration
+        announcements.add(new Announcement(
+            "🏘️ Welcome to The Barangay San Lorenza Information System",
+            "We are excited to introduce our new digital information system that will help streamline resident services, certificate processing, and community communication. This system will make it easier for residents to access important information and services.",
+            "General", "Important", "System Admin"));
+
+        announcements.add(new Announcement(
+            "🚨 COVID-19 Vaccination Schedule Update",
+            "The barangay health center will be conducting free COVID-19 booster shots this Saturday from 8:00 AM to 5:00 PM. All eligible residents aged 18 and above are encouraged to participate. Please bring your vaccination card and valid ID.",
+            "Health", "Urgent", "Health Committee"));
+
+        announcements.add(new Announcement(
+            "🎉 Barangay Fiesta Celebration - March 15-17",
+            "Join us for three days of celebration! Highlights include the traditional parade, beauty pageant, fireworks display, and community feast. All residents are welcome to participate in the various activities and contests.",
+            "Event", "Important", "Events Committee"));
+
+        announcements.add(new Announcement(
+            "💧 Water Interruption Notice",
+            "Due to scheduled maintenance, water supply will be interrupted in Zones 3, 5, and 7 from 9:00 AM to 2:00 PM tomorrow. We apologize for the inconvenience and ask residents to store water for essential use during this period.",
+            "Services", "Urgent", "Barangay Office"));
+
+        announcements.add(new Announcement(
+            "📚 Senior Citizens' Monthly Meeting",
+            "The monthly meeting for senior citizens will be held this Friday at 2:00 PM in the barangay hall. Topics include health programs, pension updates, and social activities. Light refreshments will be served.",
+            "Community", "Normal", "Senior Citizens Club"));
+    }
+
     private void initializeUI() {
-        setTitle("🏘️ Barangay San Lorenzo Information System");
-        setSize(1000, 700);
+        setTitle("🏘️ Barangay San Lorenza Information System");
+        setSize(1200, 700); // Increased width to accommodate sidebar
         setBackground(BACKGROUND_COLOR);
         setLayout(new BorderLayout(15, 15));
         setResizable(true);
@@ -549,27 +784,35 @@ public class BarangayInfoSys extends Frame {
         // Status Panel
         Panel statusPanel = createStatusPanel();
 
+        // Announcements Sidebar Panel
+        Panel announcementsPanel = createAnnouncementsPanel();
+
         // Main container with padding
-        mainPanel = new Panel(new BorderLayout(10, 10));
+        mainPanel = new ModernBackgroundPanel(new BorderLayout(10, 10));
         mainPanel.setBackground(BACKGROUND_COLOR);
         mainPanel.add(titlePanel, BorderLayout.NORTH);
         mainPanel.add(inputPanel, BorderLayout.CENTER);
 
         // Bottom container
-        Panel bottomPanel = new Panel(new BorderLayout());
+        Panel bottomPanel = new ModernBackgroundPanel(new BorderLayout());
         bottomPanel.setBackground(BACKGROUND_COLOR);
         bottomPanel.add(listPanel, BorderLayout.CENTER);
         bottomPanel.add(controlPanel, BorderLayout.SOUTH);
 
-        add(mainPanel, BorderLayout.NORTH);
-        add(bottomPanel, BorderLayout.CENTER);
-        add(statusPanel, BorderLayout.SOUTH);
+        // Main content area (left side)
+        Panel contentPanel = new ModernBackgroundPanel(new BorderLayout());
+        contentPanel.add(mainPanel, BorderLayout.NORTH);
+        contentPanel.add(bottomPanel, BorderLayout.CENTER);
+        contentPanel.add(statusPanel, BorderLayout.SOUTH);
+
+        add(contentPanel, BorderLayout.CENTER);
+        add(announcementsPanel, BorderLayout.EAST);
     }
 
     private Panel createTitlePanel() {
         GlossyHeaderPanel panel = new GlossyHeaderPanel();
         panel.setLayout(new FlowLayout(FlowLayout.CENTER));
-        panel.setPreferredSize(new Dimension(1000, 70));
+        panel.setPreferredSize(new Dimension(1200, 70));
 
         titleLabel = new Label("Barangay San Lorenza Resident Information System - User: " + currentUser.getName());
         titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 20));
@@ -577,7 +820,7 @@ public class BarangayInfoSys extends Frame {
         titleLabel.setAlignment(Label.CENTER);
 
         panel.add(titleLabel);
-        panel.setPreferredSize(new Dimension(1000, 70));
+        panel.setPreferredSize(new Dimension(1200, 70));
         return panel;
     }
 
@@ -627,6 +870,9 @@ public class BarangayInfoSys extends Frame {
     }
 
     private class GlossyHeaderPanel extends Panel {
+        private GradientPaint gradient;
+        private int lastWidth, lastHeight;
+
         public GlossyHeaderPanel() {
             setBackground(PRIMARY_COLOR);
         }
@@ -638,10 +884,17 @@ public class BarangayInfoSys extends Frame {
             int w = getWidth();
             int h = getHeight();
 
-            GradientPaint gradient = new GradientPaint(0, 0, PRIMARY_COLOR.brighter(), 0, h, PRIMARY_COLOR.darker());
+            // Cache gradient for performance
+            if (gradient == null || w != lastWidth || h != lastHeight) {
+                gradient = new GradientPaint(0, 0, PRIMARY_COLOR.brighter(), 0, h, PRIMARY_COLOR.darker());
+                lastWidth = w;
+                lastHeight = h;
+            }
+
             g2.setPaint(gradient);
             g2.fillRoundRect(0, 0, w, h, 30, 30);
 
+            // Optimized glow effects
             g2.setColor(new Color(255, 255, 255, 90));
             g2.fillOval(w - 180, 8, 140, 50);
 
@@ -653,13 +906,200 @@ public class BarangayInfoSys extends Frame {
 
         @Override
         public void update(Graphics g) {
+            // Only repaint if necessary
+            if (getGraphics() != null) {
+                paint(g);
+            }
+        }
+    }
+
+    private static class ModernLoginPanel extends Panel {
+        private GradientPaint gradient;
+        private int lastWidth, lastHeight;
+
+        public ModernLoginPanel() {
+            super();
+            setBackground(new Color(34, 139, 34));
+        }
+
+        @Override
+        public void paint(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g;
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int w = getWidth();
+            int h = getHeight();
+
+            // Cache gradient for performance
+            if (gradient == null || w != lastWidth || h != lastHeight) {
+                gradient = new GradientPaint(0, 0, new Color(34, 139, 34), 0, h, new Color(25, 111, 61));
+                lastWidth = w;
+                lastHeight = h;
+            }
+
+            g2.setPaint(gradient);
+            g2.fillRect(0, 0, w, h);
+
+            // Optimized pattern overlay
+            g2.setColor(new Color(255, 255, 255, 20));
+            for (int i = 0; i < w; i += 40) {  // Reduced frequency
+                for (int j = 0; j < h; j += 40) {
+                    if ((i + j) % 80 == 0) {
+                        g2.fillOval(i, j, 2, 2);
+                    }
+                }
+            }
+
+            // Simplified geometric shapes
+            g2.setColor(new Color(255, 255, 255, 30));
+            g2.fillRoundRect(w - 200, 50, 150, 100, 20, 20);
+            g2.fillRoundRect(50, h - 150, 120, 80, 15, 15);
+
+            super.paint(g);
+        }
+
+        @Override
+        public void update(Graphics g) {
+            // Only repaint if necessary
+            if (getGraphics() != null) {
+                paint(g);
+            }
+        }
+    }
+
+    private static class GlassyButton extends Button {
+        private Color baseColor;
+        private boolean isHovered = false;
+        private boolean isPressed = false;
+
+        public GlassyButton(String text, Color baseColor) {
+            super(text);
+            this.baseColor = baseColor;
+            setFont(new Font("Segoe UI", Font.BOLD, 12));
+            setForeground(Color.WHITE);
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+            addMouseListener(new MouseAdapter() {
+                public void mouseEntered(MouseEvent e) {
+                    isHovered = true;
+                    repaint();
+                }
+                public void mouseExited(MouseEvent e) {
+                    isHovered = false;
+                    repaint();
+                }
+                public void mousePressed(MouseEvent e) {
+                    isPressed = true;
+                    repaint();
+                }
+                public void mouseReleased(MouseEvent e) {
+                    isPressed = false;
+                    repaint();
+                }
+            });
+        }
+
+        @Override
+        public void paint(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g;
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+            int w = getWidth();
+            int h = getHeight();
+
+            // Create glassy effect
+            Color buttonColor = baseColor;
+            if (isPressed) {
+                buttonColor = baseColor.darker().darker();
+            } else if (isHovered) {
+                buttonColor = baseColor.brighter();
+            }
+
+            // Main button background with gradient
+            GradientPaint gradient = new GradientPaint(0, 0, buttonColor.brighter(), 0, h, buttonColor.darker());
+            g2.setPaint(gradient);
+            g2.fillRoundRect(2, 2, w - 4, h - 4, 15, 15);
+
+            // Glassy overlay
+            g2.setColor(new Color(255, 255, 255, 100));
+            g2.fillRoundRect(2, 2, w - 4, h / 2, 15, 15);
+
+            // Inner highlight
+            g2.setColor(new Color(255, 255, 255, 60));
+            g2.drawRoundRect(3, 3, w - 6, h - 6, 13, 13);
+
+            // Shadow effect
+            g2.setColor(new Color(0, 0, 0, 50));
+            g2.fillRoundRect(0, h - 2, w, 2, 0, 0);
+
+            super.paint(g);
+        }
+
+        @Override
+        public void update(Graphics g) {
             paint(g);
+        }
+    }
+
+    private class ModernBackgroundPanel extends Panel {
+        private GradientPaint gradient;
+        private int lastWidth, lastHeight;
+
+        public ModernBackgroundPanel() {
+            super();
+            setBackground(MODERN_BG_START);
+        }
+
+        public ModernBackgroundPanel(LayoutManager layout) {
+            super(layout);
+            setBackground(MODERN_BG_START);
+        }
+
+        @Override
+        public void paint(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g;
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int w = getWidth();
+            int h = getHeight();
+
+            // Cache gradient for performance
+            if (gradient == null || w != lastWidth || h != lastHeight) {
+                gradient = new GradientPaint(0, 0, MODERN_BG_START, 0, h, MODERN_BG_END);
+                lastWidth = w;
+                lastHeight = h;
+            }
+
+            g2.setPaint(gradient);
+            g2.fillRect(0, 0, w, h);
+
+            // Optimized pattern overlay - reduce frequency for better performance
+            g2.setColor(new Color(255, 255, 255, 30));
+            for (int i = 0; i < w; i += 25) {  // Increased step size
+                for (int j = 0; j < h; j += 25) {  // Increased step size
+                    if ((i + j) % 50 == 0) {  // Adjusted pattern
+                        g2.fillOval(i, j, 1, 1);  // Smaller dots
+                    }
+                }
+            }
+
+            // Simplified border
+            g2.setColor(new Color(149, 165, 166, 50));
+            g2.drawRoundRect(5, 5, w - 10, h - 10, 20, 20);
+
+            super.paint(g);
+        }
+
+        @Override
+        public void update(Graphics g) {
+            // Only repaint if necessary
+            if (getGraphics() != null) {
+                paint(g);
+            }
         }
     }
 
     private Panel createInputPanel() {
         Panel panel = new Panel(new GridBagLayout());
-        panel.setBackground(CARD_COLOR);
+        panel.setBackground(FORM_BACKGROUND);
         panel.setPreferredSize(new Dimension(1000, 200));
 
         GridBagConstraints gbc = new GridBagConstraints();
@@ -788,7 +1228,7 @@ public class BarangayInfoSys extends Frame {
 
     private Panel createListPanel() {
         Panel panel = new Panel(new BorderLayout());
-        panel.setBackground(CARD_COLOR);
+        panel.setBackground(FORM_BACKGROUND);
 
         Label listTitle = new Label("📋 Resident Records");
         listTitle.setFont(new Font("Segoe UI", Font.BOLD, 14));
@@ -827,15 +1267,14 @@ public class BarangayInfoSys extends Frame {
         addButton = createStyledButton("➕ Add Resident", SECONDARY_COLOR);
         clearButton = createStyledButton("🧹 Clear Form", ACCENT_COLOR);
         removeButton = createStyledButton("🗑️ Delete Selected", DANGER_COLOR);
-        saveButton = createStyledButton("💾 Save to Access", new Color(108, 117, 125));
+        exportExcelButton = createStyledButton("📊 Export to Excel", new Color(34, 139, 34));
 
+        barcodeButton = createStyledButton("🔲 Generate Barcode", new Color(75, 0, 130));
         actionPanel.add(addButton);
         actionPanel.add(clearButton);
         actionPanel.add(removeButton);
-        actionPanel.add(saveButton);
-
-        saveAndOpenButton = createStyledButton("💾 Save + Open Access", new Color(52, 73, 94));
-        actionPanel.add(saveAndOpenButton);
+        actionPanel.add(exportExcelButton);
+        actionPanel.add(barcodeButton);
 
         // Administrative module buttons (new scope)
         Panel modulePanel = new Panel(new FlowLayout(FlowLayout.CENTER, 8, 8));
@@ -845,12 +1284,18 @@ public class BarangayInfoSys extends Frame {
         financeButton = createStyledButton("💰 Financial Management", SECONDARY_COLOR);
         announcementButton = createStyledButton("📢 Announcements", new Color(108, 117, 125));
         userMgmtButton = createStyledButton("👥 User Management", new Color(52, 73, 94));
+        reportButton = createStyledButton("📰 Report News", new Color(255, 140, 0));
+        Button barcodeGenModuleButton = createStyledButton("🔲 Barcode Generator", new Color(75, 0, 130));
 
         modulePanel.add(certificationsButton);
         modulePanel.add(complaintButton);
         modulePanel.add(financeButton);
         modulePanel.add(announcementButton);
         modulePanel.add(userMgmtButton);
+        modulePanel.add(reportButton);
+        modulePanel.add(barcodeGenModuleButton);
+
+        barcodeGenModuleButton.addActionListener(e -> openBarcodeGeneratorModule());
 
         panel.add(searchPanel);
         panel.add(actionPanel);
@@ -859,17 +1304,40 @@ public class BarangayInfoSys extends Frame {
         return panel;
     }
 
+    private Panel createAnnouncementsPanel() {
+        Panel panel = new ModernBackgroundPanel(new BorderLayout());
+        panel.setBackground(FORM_BACKGROUND);
+        panel.setPreferredSize(new Dimension(300, 700));
+
+        // Header
+        Panel headerPanel = new Panel(new FlowLayout(FlowLayout.CENTER));
+        headerPanel.setBackground(PRIMARY_COLOR);
+        Label headerLabel = new Label("📢 Announcements");
+        headerLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        headerLabel.setForeground(Color.WHITE);
+        headerPanel.add(headerLabel);
+
+        // Scrolling announcements area
+        ScrollingAnnouncementsPanel scrollPanel = new ScrollingAnnouncementsPanel();
+        scrollPanel.setPreferredSize(new Dimension(280, 600));
+
+        panel.add(headerPanel, BorderLayout.NORTH);
+        panel.add(scrollPanel, BorderLayout.CENTER);
+
+        return panel;
+    }
+
     private Panel createStatusPanel() {
         Panel panel = new Panel(new BorderLayout());
-        panel.setBackground(new Color(240, 240, 240));
+        panel.setBackground(FORM_BACKGROUND);
 
         statusLabel = new Label("✅ Logged in as " + currentUser.getName() + " - " + currentUser.getRole(), Label.LEFT);
         statusLabel.setFont(labelFont);
         statusLabel.setForeground(TEXT_COLOR);
-        statusLabel.setBackground(new Color(240, 240, 240));
+        statusLabel.setBackground(FORM_BACKGROUND);
 
         panel.add(statusLabel, BorderLayout.CENTER);
-        panel.setPreferredSize(new Dimension(1000, 30));
+        panel.setPreferredSize(new Dimension(1200, 30));
 
         return panel;
     }
@@ -884,7 +1352,7 @@ public class BarangayInfoSys extends Frame {
     private TextField createStyledTextField(int columns) {
         TextField field = new TextField(columns);
         field.setFont(labelFont);
-        field.setBackground(Color.WHITE);
+        field.setBackground(new Color(250, 250, 250)); // Very light gray-green
         field.setForeground(TEXT_COLOR);
         return field;
     }
@@ -892,7 +1360,7 @@ public class BarangayInfoSys extends Frame {
     private Choice createStyledChoice() {
         Choice choice = new Choice();
         choice.setFont(labelFont);
-        choice.setBackground(Color.WHITE);
+        choice.setBackground(new Color(250, 250, 250)); // Very light gray-green
         choice.setForeground(TEXT_COLOR);
         return choice;
     }
@@ -944,35 +1412,52 @@ public class BarangayInfoSys extends Frame {
         public void paint(Graphics g) {
             Graphics2D g2 = (Graphics2D) g;
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+            int w = getWidth();
+            int h = getHeight();
+
+            // Calculate colors once for better performance
             Color topColor = hovered ? baseColor.brighter() : baseColor;
             Color bottomColor = hovered ? baseColor : baseColor.darker();
             if (pressed) {
                 topColor = topColor.darker();
                 bottomColor = bottomColor.darker();
             }
-            GradientPaint paint = new GradientPaint(0, 0, topColor, 0, getHeight(), bottomColor);
-            g2.setPaint(paint);
-            g2.fillRoundRect(0, 0, getWidth(), getHeight(), 20, 20);
 
-            if (hovered) {
-                g2.setColor(new Color(255, 255, 255, 60));
-                g2.fillRoundRect(0, 0, getWidth(), getHeight() / 2, 20, 20);
+            // Main gradient background
+            GradientPaint paint = new GradientPaint(0, 0, topColor, 0, h, bottomColor);
+            g2.setPaint(paint);
+            g2.fillRoundRect(0, 0, w, h, 20, 20);
+
+            // Glassy highlight effect
+            if (hovered || pressed) {
+                g2.setColor(new Color(255, 255, 255, pressed ? 40 : 60));
+                g2.fillRoundRect(0, 0, w, h / 2, 20, 20);
             }
 
-            g2.setColor(Color.WHITE);
-            g2.setStroke(new BasicStroke(2));
-            g2.drawRoundRect(1, 1, getWidth() - 3, getHeight() - 3, 20, 20);
+            // Subtle inner glow
+            g2.setColor(new Color(255, 255, 255, 30));
+            g2.drawRoundRect(1, 1, w - 3, h - 3, 18, 18);
 
+            // Glass reflection effect
+            g2.setColor(new Color(255, 255, 255, 80));
+            g2.fillRoundRect(2, 2, w - 4, h / 3, 16, 16);
+
+            // Text with better positioning
+            g2.setColor(Color.WHITE);
             g2.setFont(getFont());
             FontMetrics fm = g2.getFontMetrics();
             int textWidth = fm.stringWidth(getLabel());
             int textHeight = fm.getAscent();
-            g2.drawString(getLabel(), (getWidth() - textWidth) / 2, (getHeight() + textHeight) / 2 - 2);
+            g2.drawString(getLabel(), (w - textWidth) / 2, (h + textHeight) / 2 - 2);
         }
 
         @Override
         public void update(Graphics g) {
-            paint(g);
+            // Only repaint if necessary to reduce lag
+            if (getGraphics() != null) {
+                paint(g);
+            }
         }
 
         @Override
@@ -982,15 +1467,197 @@ public class BarangayInfoSys extends Frame {
         }
     }
 
+    // Facebook-style scrolling announcements panel
+    private class ScrollingAnnouncementsPanel extends Panel implements Runnable {
+        private java.util.List<Announcement> activeAnnouncements;
+        private int currentIndex = 0;
+        private Thread scrollThread;
+        private boolean scrolling = true;
+        private final int SCROLL_DELAY = 5000; // 5 seconds per announcement
+
+        public ScrollingAnnouncementsPanel() {
+            setLayout(new BorderLayout());
+            setBackground(Color.WHITE);
+            activeAnnouncements = new java.util.ArrayList<>();
+
+            // Filter active announcements
+            updateActiveAnnouncements();
+
+            // Start scrolling thread
+            scrollThread = new Thread(this);
+            scrollThread.setDaemon(true);
+            scrollThread.start();
+
+            // Add mouse listener to pause/resume scrolling
+            addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseClicked(MouseEvent e) {
+                    scrolling = !scrolling;
+                    if (scrolling && scrollThread != null) {
+                        synchronized (scrollThread) {
+                            scrollThread.notify();
+                        }
+                    }
+                }
+            });
+        }
+
+        private void updateActiveAnnouncements() {
+            activeAnnouncements.clear();
+            for (Announcement ann : announcements) {
+                if ("Active".equals(ann.getStatus())) {
+                    activeAnnouncements.add(ann);
+                }
+            }
+            if (activeAnnouncements.isEmpty()) {
+                // Add a default announcement if none are active
+                activeAnnouncements.add(new Announcement(
+                    "No Active Announcements",
+                    "There are currently no active announcements. Check back later for updates from the barangay office.",
+                    "System", "Normal", "System"));
+            }
+        }
+
+        @Override
+        public void run() {
+            while (true) {
+                try {
+                    if (scrolling) {
+                        updateActiveAnnouncements();
+                        if (!activeAnnouncements.isEmpty()) {
+                            currentIndex = (currentIndex + 1) % activeAnnouncements.size();
+                        }
+                        repaint();
+                    }
+
+                    synchronized (scrollThread) {
+                        scrollThread.wait(SCROLL_DELAY);
+                    }
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+        }
+
+        @Override
+        public void paint(Graphics g) {
+            super.paint(g);
+            Graphics2D g2 = (Graphics2D) g;
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+            if (activeAnnouncements.isEmpty()) {
+                return;
+            }
+
+            Announcement currentAnn = activeAnnouncements.get(currentIndex);
+
+            int width = getWidth();
+            int height = getHeight();
+
+            // Draw announcement card background
+            g2.setColor(CARD_COLOR);
+            g2.fillRoundRect(5, 5, width - 10, height - 10, 15, 15);
+
+            // Draw border
+            g2.setColor(new Color(200, 200, 200));
+            g2.setStroke(new BasicStroke(1));
+            g2.drawRoundRect(5, 5, width - 10, height - 10, 15, 15);
+
+            // Draw priority indicator
+            Color priorityColor = getPriorityColor(currentAnn.getPriority());
+            g2.setColor(priorityColor);
+            g2.fillRect(5, 5, width - 10, 8);
+
+            // Draw title
+            g2.setColor(TEXT_COLOR);
+            g2.setFont(new Font("Segoe UI", Font.BOLD, 12));
+            FontMetrics fm = g2.getFontMetrics();
+            String title = currentAnn.getTitle();
+            if (fm.stringWidth(title) > width - 20) {
+                title = title.substring(0, Math.min(title.length(), 30)) + "...";
+            }
+            g2.drawString(title, 15, 30);
+
+            // Draw category and priority
+            g2.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+            g2.setColor(new Color(100, 100, 100));
+            String categoryInfo = currentAnn.getCategory() + " • " + currentAnn.getPriority();
+            g2.drawString(categoryInfo, 15, 45);
+
+            // Draw message (truncated)
+            g2.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+            g2.setColor(TEXT_COLOR);
+            String message = currentAnn.getMessage();
+            if (message.length() > 100) {
+                message = message.substring(0, 100) + "...";
+            }
+
+            // Word wrap the message
+            int y = 65;
+            int maxWidth = width - 30;
+            java.util.StringTokenizer st = new java.util.StringTokenizer(message, " ");
+            StringBuilder line = new StringBuilder();
+
+            while (st.hasMoreTokens()) {
+                String word = st.nextToken();
+                String testLine = line + (line.length() > 0 ? " " : "") + word;
+                if (fm.stringWidth(testLine) > maxWidth && line.length() > 0) {
+                    g2.drawString(line.toString(), 15, y);
+                    y += 15;
+                    line = new StringBuilder(word);
+                    if (y > height - 40) break; // Don't overflow
+                } else {
+                    line = new StringBuilder(testLine);
+                }
+            }
+            if (line.length() > 0 && y <= height - 40) {
+                g2.drawString(line.toString(), 15, y);
+            }
+
+            // Draw timestamp
+            g2.setFont(new Font("Segoe UI", Font.ITALIC, 9));
+            g2.setColor(new Color(150, 150, 150));
+            String timeInfo = currentAnn.getPostDate().split(" ")[0]; // Just the date
+            g2.drawString(timeInfo, 15, height - 20);
+
+            // Draw view count
+            String views = "👁️ " + currentAnn.getViewCount();
+            int viewsWidth = fm.stringWidth(views);
+            g2.drawString(views, width - viewsWidth - 15, height - 20);
+
+            // Draw scroll indicator
+            g2.setColor(scrolling ? new Color(100, 150, 255) : new Color(150, 150, 150));
+            g2.fillOval(width - 25, 15, 8, 8);
+
+            // Draw announcement counter
+            g2.setColor(TEXT_COLOR);
+            g2.setFont(new Font("Segoe UI", Font.BOLD, 10));
+            String counter = (currentIndex + 1) + "/" + activeAnnouncements.size();
+            int counterWidth = fm.stringWidth(counter);
+            g2.drawString(counter, (width - counterWidth) / 2, height - 5);
+        }
+
+        private Color getPriorityColor(String priority) {
+            switch (priority.toLowerCase()) {
+                case "urgent": return new Color(220, 53, 69); // Red
+                case "important": return new Color(255, 193, 7); // Yellow
+                default: return new Color(40, 167, 69); // Green
+            }
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+            return new Dimension(280, 600);
+        }
+    }
+
     private void setupEventHandlers() {
         addButton.addActionListener(e -> addResident());
         removeButton.addActionListener(e -> removeSelected());
-        saveButton.addActionListener(e -> saveResidentsToAccess());
-        saveAndOpenButton.addActionListener(e -> saveAndOpenAccessDatabase());
         searchButton.addActionListener(e -> searchResidents());
         refreshButton.addActionListener(e -> refreshList());
         clearButton.addActionListener(e -> clearForm());
-
+        exportExcelButton.addActionListener(e -> exportResidentsToExcel());
         certificationsButton.addActionListener(e -> openCertificateModule());
 
         complaintButton.addActionListener(e -> openComplaintModule());
@@ -1000,6 +1667,9 @@ public class BarangayInfoSys extends Frame {
         announcementButton.addActionListener(e -> openAnnouncementModule());
 
         userMgmtButton.addActionListener(e -> openUserManagementModule());
+
+        reportButton.addActionListener(e -> openReportNewsModule());
+        barcodeButton.addActionListener(e -> generateResidentBarcode());
 
         addWindowListener(new WindowAdapter() {
             public void windowClosing(WindowEvent e) {
@@ -1020,55 +1690,6 @@ public class BarangayInfoSys extends Frame {
             }
         });
         setFocusable(true);
-    }
-
-    private void setupDatabase() {
-        try {
-            dbManager = new AccessDatabaseManager(databasePath);
-            dbManager.initialize();
-            updateStatus("✅ Connected to Access DB: " + databasePath, SECONDARY_COLOR);
-        } catch (Exception ex) {
-            updateStatus("❌ Access DB init failed: " + ex.getMessage(), DANGER_COLOR);
-        }
-    }
-
-    private void saveResidentsToAccess() {
-        if (dbManager == null) {
-            showError("Database manager is not initialized.");
-            return;
-        }
-
-        try {
-            dbManager.saveAllResidents(residentListUI.getAllResidents());
-            updateStatus("💾 Saved " + residentListUI.getAllResidents().size() + " residents to Access DB", SECONDARY_COLOR);
-        } catch (Exception ex) {
-            updateStatus("❌ Save to Access failed: " + ex.getMessage(), DANGER_COLOR);
-            showError("Unable to save residents to Access: " + ex.getMessage());
-        }
-    }
-
-    private void saveAndOpenAccessDatabase() {
-        saveResidentsToAccess();
-        openAccessDatabase();
-    }
-
-    private void openAccessDatabase() {
-        try {
-            File dbFile = new File(databasePath);
-            if (!dbFile.exists()) {
-                showError("Access file not found: " + databasePath);
-                return;
-            }
-            if (!Desktop.isDesktopSupported()) {
-                showError("Desktop open is not supported on this platform.");
-                return;
-            }
-            Desktop.getDesktop().open(dbFile);
-            updateStatus("📂 Opened Access DB: " + dbFile.getName(), SECONDARY_COLOR);
-        } catch (Exception ex) {
-            updateStatus("❌ Could not open Access DB: " + ex.getMessage(), DANGER_COLOR);
-            showError("Unable to open Access database: " + ex.getMessage());
-        }
     }
 
     private void addResident() {
@@ -1265,7 +1886,7 @@ public class BarangayInfoSys extends Frame {
         controlPanel.setBackground(BACKGROUND_COLOR);
 
         Button addCert = createStyledButton("➕ New Certificate", SECONDARY_COLOR);
-        Button issueCert = createStyledButton("✅ Issue Certificate", ACCENT_COLOR);
+        Button issueCert = createStyledButton("Issue Certificate", ACCENT_COLOR);
         Button rejectCert = createStyledButton("❌ Reject Certificate", DANGER_COLOR);
         Button viewDetails = createStyledButton("👁️ View Details", PRIMARY_COLOR);
         Button generateReport = createStyledButton("📊 Generate Report", new Color(52, 73, 94));
@@ -1362,8 +1983,12 @@ public class BarangayInfoSys extends Frame {
                 String purpose = purposeField.getText().trim();
                 double fee = Double.parseDouble(feeField.getText().trim());
 
-                if (residentInfo.isEmpty() || purpose.isEmpty()) {
+                if (residentInfo.isEmpty() || purpose.isEmpty() || feeField.getText().trim().isEmpty()) {
                     JOptionPane.showMessageDialog(dialog, "Please fill all required fields!");
+                    return;
+                }
+                if (fee < 0) {
+                    JOptionPane.showMessageDialog(dialog, "Fee cannot be negative!");
                     return;
                 }
 
@@ -1409,10 +2034,7 @@ public class BarangayInfoSys extends Frame {
 
     private void issueSelectedCertificate(java.awt.List certList) {
         int idx = certList.getSelectedIndex();
-        if (idx < 0) {
-            JOptionPane.showMessageDialog(null, "Please select a certificate to issue!");
-            return;
-        }
+        if (idx < 0 || idx >= certificates.size()) { JOptionPane.showMessageDialog(null, "Please select a certificate to issue!"); return; }
 
         Certificate cert = certificates.get(idx);
         if (!cert.getStatus().equals("Pending")) {
@@ -1428,10 +2050,7 @@ public class BarangayInfoSys extends Frame {
 
     private void rejectSelectedCertificate(java.awt.List certList) {
         int idx = certList.getSelectedIndex();
-        if (idx < 0) {
-            JOptionPane.showMessageDialog(null, "Please select a certificate to reject!");
-            return;
-        }
+        if (idx < 0 || idx >= certificates.size()) { JOptionPane.showMessageDialog(null, "Please select a certificate to reject!"); return; }
 
         Certificate cert = certificates.get(idx);
         if (!cert.getStatus().equals("Pending")) {
@@ -1450,10 +2069,7 @@ public class BarangayInfoSys extends Frame {
 
     private void viewCertificateDetails(java.awt.List certList) {
         int idx = certList.getSelectedIndex();
-        if (idx < 0) {
-            JOptionPane.showMessageDialog(null, "Please select a certificate to view!");
-            return;
-        }
+        if (idx < 0 || idx >= certificates.size()) { JOptionPane.showMessageDialog(null, "Please select a certificate to view!"); return; }
 
         Certificate cert = certificates.get(idx);
         String details = String.format(
@@ -1733,10 +2349,7 @@ public class BarangayInfoSys extends Frame {
 
     private void updateComplaintStatus(java.awt.List complaintList) {
         int idx = complaintList.getSelectedIndex();
-        if (idx < 0) {
-            JOptionPane.showMessageDialog(null, "Please select a complaint to update!");
-            return;
-        }
+        if (idx < 0 || idx >= complaints.size()) { JOptionPane.showMessageDialog(null, "Please select a complaint to update!"); return; }
 
         Complaint complaint = complaints.get(idx);
         String[] options = {"New", "In Progress", "Resolved", "Closed"};
@@ -1756,10 +2369,7 @@ public class BarangayInfoSys extends Frame {
 
     private void assignComplaintTo(java.awt.List complaintList) {
         int idx = complaintList.getSelectedIndex();
-        if (idx < 0) {
-            JOptionPane.showMessageDialog(null, "Please select a complaint to assign!");
-            return;
-        }
+        if (idx < 0 || idx >= complaints.size()) { JOptionPane.showMessageDialog(null, "Please select a complaint to assign!"); return; }
 
         Complaint complaint = complaints.get(idx);
         String assignee = JOptionPane.showInputDialog(null,
@@ -1776,10 +2386,7 @@ public class BarangayInfoSys extends Frame {
 
     private void addComplaintUpdate(java.awt.List complaintList) {
         int idx = complaintList.getSelectedIndex();
-        if (idx < 0) {
-            JOptionPane.showMessageDialog(null, "Please select a complaint to update!");
-            return;
-        }
+        if (idx < 0 || idx >= complaints.size()) { JOptionPane.showMessageDialog(null, "Please select a complaint to update!"); return; }
 
         Complaint complaint = complaints.get(idx);
         String update = JOptionPane.showInputDialog(null,
@@ -1794,10 +2401,7 @@ public class BarangayInfoSys extends Frame {
 
     private void viewComplaintDetails(java.awt.List complaintList) {
         int idx = complaintList.getSelectedIndex();
-        if (idx < 0) {
-            JOptionPane.showMessageDialog(null, "Please select a complaint to view!");
-            return;
-        }
+        if (idx < 0 || idx >= complaints.size()) { JOptionPane.showMessageDialog(null, "Please select a complaint to view!"); return; }
 
         Complaint complaint = complaints.get(idx);
         StringBuilder details = new StringBuilder();
@@ -1881,10 +2485,7 @@ public class BarangayInfoSys extends Frame {
 
     private void escalateComplaint(java.awt.List complaintList) {
         int idx = complaintList.getSelectedIndex();
-        if (idx < 0) {
-            JOptionPane.showMessageDialog(null, "Please select a complaint to escalate!");
-            return;
-        }
+        if (idx < 0 || idx >= complaints.size()) { JOptionPane.showMessageDialog(null, "Please select a complaint to escalate!"); return; }
 
         Complaint complaint = complaints.get(idx);
         if (complaint.getPriority().equals("Urgent")) {
@@ -1943,12 +2544,13 @@ public class BarangayInfoSys extends Frame {
         int totalTransactions = payments.size();
 
         for (PaymentRecord payment : payments) {
-            if (payment.getCategory().toLowerCase().contains("income") ||
-                payment.getCategory().toLowerCase().contains("fee") ||
-                payment.getCategory().toLowerCase().contains("service")) {
-                totalIncome += payment.getNetAmount();
-            } else {
-                totalExpenses += payment.getNetAmount();
+            if ("Completed".equals(payment.getStatus())) {
+                String cat = payment.getCategory().toLowerCase();
+                if (cat.contains("fee") || cat.contains("permit") || cat.contains("income") || cat.contains("service")) {
+                    totalIncome += payment.getNetAmount();
+                } else if (cat.contains("expense")) {
+                    totalExpenses += payment.getNetAmount();
+                }
             }
         }
         netIncome = totalIncome - totalExpenses;
@@ -2162,8 +2764,16 @@ public class BarangayInfoSys extends Frame {
                 String method = methodChoice.getSelectedItem();
                 String notes = notesField.getText().trim();
 
-                if (payerInfo.isEmpty() || purpose.isEmpty()) {
+                if (payerInfo.isEmpty() || purpose.isEmpty() || amountField.getText().trim().isEmpty()) {
                     JOptionPane.showMessageDialog(dialog, "Please fill all required fields!");
+                    return;
+                }
+                if (amount < 0 || discount < 0) {
+                    JOptionPane.showMessageDialog(dialog, "Amount and discount cannot be negative!");
+                    return;
+                }
+                if (discount > amount) {
+                    JOptionPane.showMessageDialog(dialog, "Discount cannot exceed the amount!");
                     return;
                 }
 
@@ -2198,10 +2808,7 @@ public class BarangayInfoSys extends Frame {
 
     private void editSelectedPayment(java.awt.List paymentList) {
         int idx = paymentList.getSelectedIndex();
-        if (idx < 0) {
-            JOptionPane.showMessageDialog(null, "Please select a payment to edit!");
-            return;
-        }
+        if (idx < 0 || idx >= payments.size()) { JOptionPane.showMessageDialog(null, "Please select a payment to edit!"); return; }
 
         PaymentRecord payment = payments.get(idx);
         if (!payment.getStatus().equals("Completed")) {
@@ -2223,10 +2830,7 @@ public class BarangayInfoSys extends Frame {
 
     private void voidSelectedPayment(java.awt.List paymentList) {
         int idx = paymentList.getSelectedIndex();
-        if (idx < 0) {
-            JOptionPane.showMessageDialog(null, "Please select a payment to void!");
-            return;
-        }
+        if (idx < 0 || idx >= payments.size()) { JOptionPane.showMessageDialog(null, "Please select a payment to void!"); return; }
 
         PaymentRecord payment = payments.get(idx);
         if (!payment.getStatus().equals("Completed")) {
@@ -2252,10 +2856,7 @@ public class BarangayInfoSys extends Frame {
 
     private void viewPaymentReceipt(java.awt.List paymentList) {
         int idx = paymentList.getSelectedIndex();
-        if (idx < 0) {
-            JOptionPane.showMessageDialog(null, "Please select a payment to view receipt!");
-            return;
-        }
+        if (idx < 0 || idx >= payments.size()) { JOptionPane.showMessageDialog(null, "Please select a payment to view receipt!"); return; }
 
         PaymentRecord payment = payments.get(idx);
         String receipt = String.format(
@@ -2301,14 +2902,13 @@ public class BarangayInfoSys extends Frame {
                 paymentCal.setTime(paymentDate);
 
                 if (paymentCal.get(java.util.Calendar.MONTH) + 1 == currentMonth &&
-                    paymentCal.get(java.util.Calendar.YEAR) == currentYear) {
-
+                    paymentCal.get(java.util.Calendar.YEAR) == currentYear &&
+                    "Completed".equals(payment.getStatus())) {
                     transactionCount++;
-                    if (payment.getCategory().toLowerCase().contains("income") ||
-                        payment.getCategory().toLowerCase().contains("fee") ||
-                        payment.getCategory().toLowerCase().contains("service")) {
+                    String cat = payment.getCategory().toLowerCase();
+                    if (cat.contains("fee") || cat.contains("permit") || cat.contains("income") || cat.contains("service")) {
                         monthlyIncome += payment.getNetAmount();
-                    } else {
+                    } else if (cat.contains("expense")) {
                         monthlyExpenses += payment.getNetAmount();
                     }
                 }
@@ -2350,21 +2950,18 @@ public class BarangayInfoSys extends Frame {
                 java.util.Calendar paymentCal = java.util.Calendar.getInstance();
                 paymentCal.setTime(paymentDate);
 
-                if (paymentCal.get(java.util.Calendar.YEAR) == currentYear) {
+                if (paymentCal.get(java.util.Calendar.YEAR) == currentYear &&
+                    "Completed".equals(payment.getStatus())) {
                     transactionCount++;
                     String monthKey = String.format("%02d/%d",
                         paymentCal.get(java.util.Calendar.MONTH) + 1, currentYear);
-
-                    if (payment.getCategory().toLowerCase().contains("income") ||
-                        payment.getCategory().toLowerCase().contains("fee") ||
-                        payment.getCategory().toLowerCase().contains("service")) {
+                    String cat = payment.getCategory().toLowerCase();
+                    if (cat.contains("fee") || cat.contains("permit") || cat.contains("income") || cat.contains("service")) {
                         annualIncome += payment.getNetAmount();
-                        monthlyIncome.put(monthKey,
-                            monthlyIncome.getOrDefault(monthKey, 0.0) + payment.getNetAmount());
-                    } else {
+                        monthlyIncome.put(monthKey, monthlyIncome.getOrDefault(monthKey, 0.0) + payment.getNetAmount());
+                    } else if (cat.contains("expense")) {
                         annualExpenses += payment.getNetAmount();
-                        monthlyExpenses.put(monthKey,
-                            monthlyExpenses.getOrDefault(monthKey, 0.0) + payment.getNetAmount());
+                        monthlyExpenses.put(monthKey, monthlyExpenses.getOrDefault(monthKey, 0.0) + payment.getNetAmount());
                     }
                 }
             } catch (Exception e) {
@@ -2415,23 +3012,183 @@ public class BarangayInfoSys extends Frame {
             JOptionPane.INFORMATION_MESSAGE);
     }
 
+    private void openBarcodeGeneratorModule() {
+        Frame frame = new Frame("🔲 Barcode Generator");
+        frame.setSize(600, 420);
+        frame.setLayout(new BorderLayout(10, 10));
+        frame.setBackground(Color.WHITE);
+
+        // Header
+        Panel headerPanel = new Panel(new FlowLayout(FlowLayout.CENTER));
+        headerPanel.setBackground(new Color(75, 0, 130));
+        Label headerLabel = new Label("🔲 Barcode Generator", Label.CENTER);
+        headerLabel.setFont(new Font("Segoe UI", Font.BOLD, 16));
+        headerLabel.setForeground(Color.WHITE);
+        headerPanel.add(headerLabel);
+
+        // Input panel
+        Panel inputPanel = new Panel(new FlowLayout(FlowLayout.CENTER, 10, 10));
+        inputPanel.setBackground(new Color(245, 245, 255));
+        Label inputLabel = new Label("Enter text to encode:");
+        inputLabel.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        TextField inputField = new TextField(30);
+        inputField.setFont(new Font("Monospaced", Font.PLAIN, 14));
+        Button generateBtn = createStyledButton("Generate", new Color(75, 0, 130));
+        inputPanel.add(inputLabel);
+        inputPanel.add(inputField);
+        inputPanel.add(generateBtn);
+
+        // Barcode canvas
+        final BufferedImage[] imgHolder = { BarcodeGenerator.generate("SAMPLE", 2, 80) };
+        Canvas canvas = new Canvas() {
+            public void paint(Graphics g) {
+                g.setColor(Color.WHITE);
+                g.fillRect(0, 0, getWidth(), getHeight());
+                int x = (getWidth() - imgHolder[0].getWidth()) / 2;
+                g.drawImage(imgHolder[0], x, 10, this);
+            }
+            public Dimension getPreferredSize() { return new Dimension(560, 130); }
+        };
+        canvas.setBackground(Color.WHITE);
+
+        // Buttons
+        Panel btnPanel = new Panel(new FlowLayout(FlowLayout.CENTER, 15, 8));
+        btnPanel.setBackground(Color.WHITE);
+        Button printBtn = createStyledButton("🖨️ Print", new Color(52, 73, 94));
+        Button closeBtn = createStyledButton("Close", DANGER_COLOR);
+        btnPanel.add(printBtn);
+        btnPanel.add(closeBtn);
+
+        // Generate action
+        ActionListener doGenerate = e -> {
+            String text = inputField.getText().trim();
+            if (text.isEmpty()) {
+                JOptionPane.showMessageDialog(frame, "Please enter text to generate a barcode.");
+                return;
+            }
+            // Code 128B supports ASCII 32-126
+            for (char c : text.toCharArray()) {
+                if (c < 32 || c > 126) {
+                    JOptionPane.showMessageDialog(frame, "Only printable ASCII characters (A-Z, 0-9, symbols) are supported.");
+                    return;
+                }
+            }
+            imgHolder[0] = BarcodeGenerator.generate(text, 2, 80);
+            canvas.repaint();
+        };
+        generateBtn.addActionListener(doGenerate);
+        inputField.addActionListener(doGenerate);
+
+        printBtn.addActionListener(e -> {
+            PrinterJob job = PrinterJob.getPrinterJob();
+            job.setPrintable((graphics, pageFormat, pageIndex) -> {
+                if (pageIndex > 0) return Printable.NO_SUCH_PAGE;
+                graphics.drawImage(imgHolder[0],
+                    (int) pageFormat.getImageableX(),
+                    (int) pageFormat.getImageableY(), null);
+                return Printable.PAGE_EXISTS;
+            });
+            if (job.printDialog()) {
+                try { job.print(); } catch (PrinterException ex) {
+                    JOptionPane.showMessageDialog(frame, "Print error: " + ex.getMessage());
+                }
+            }
+        });
+        closeBtn.addActionListener(e -> frame.dispose());
+
+        frame.add(headerPanel, BorderLayout.NORTH);
+        frame.add(inputPanel, BorderLayout.CENTER);
+        Panel centerPanel = new Panel(new BorderLayout());
+        centerPanel.setBackground(Color.WHITE);
+        centerPanel.add(canvas, BorderLayout.CENTER);
+        centerPanel.add(btnPanel, BorderLayout.SOUTH);
+        frame.add(centerPanel, BorderLayout.SOUTH);
+
+        frame.addWindowListener(new WindowAdapter() {
+            public void windowClosing(WindowEvent e) { frame.dispose(); }
+        });
+        frame.setLocationRelativeTo(this);
+        frame.setVisible(true);
+    }
+
+    private void generateResidentBarcode() {
+        int idx = residentListUI.getSelectedIndex();
+        if (idx == -1) {
+            showError("Please select a resident to generate a barcode!");
+            return;
+        }
+        Resident r = residentListUI.getResident(idx);
+        String barcodeData = "RES" + r.getId();
+        BarcodeGenerator.showBarcodeWindow(this, barcodeData,
+            r.getFullName() + " | HH: " + r.getHouseholdId());
+    }
+
+    private void exportResidentsToExcel() {
+        List<Resident> residents = residentListUI.getAllResidents();
+
+        if (residents.isEmpty()) {
+            JOptionPane.showMessageDialog(null,
+                "No resident data to export.",
+                "Export Residents",
+                JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        StringBuilder csv = new StringBuilder();
+        // CSV header
+        csv.append("ID,First Name,Last Name,Middle Name,Address,Contact Number,Birth Date,Gender,Civil Status,Occupation,Email,Emergency Contact Name,Emergency Contact Number,Age,Household ID\n");
+
+        // Add resident data
+        for (Resident resident : residents) {
+            csv.append(String.format("\"%d\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%d\",\"%s\"\n",
+                resident.getId(),
+                resident.getFirstName(),
+                resident.getLastName(),
+                resident.getMiddleName(),
+                resident.getAddress(),
+                resident.getContactNumber(),
+                resident.getBirthDate(),
+                resident.getGender(),
+                resident.getCivilStatus(),
+                resident.getOccupation(),
+                resident.getEmail(),
+                resident.getEmergencyContactName(),
+                resident.getEmergencyContactNumber(),
+                resident.getAge(),
+                resident.getHouseholdId()));
+        }
+
+        // Show export summary
+        String summary = String.format(
+            "Barangay Resident Registration Data Exported\n\n" +
+            "Total Residents: %d\n" +
+            "Export Format: CSV (Compatible with Excel)\n\n" +
+            "CSV Data Preview:\n%s",
+            residents.size(),
+            csv.toString().substring(0, Math.min(800, csv.length())) + (csv.length() > 800 ? "\n..." : "")
+        );
+
+        JOptionPane.showMessageDialog(null,
+            summary,
+            "Resident Data Export to Excel",
+            JOptionPane.INFORMATION_MESSAGE);
+
+        updateStatus("📊 Exported " + residents.size() + " residents to Excel-compatible CSV format", SUCCESS_COLOR);
+    }
+
     private void applyPaymentFilter(java.awt.List paymentList, String filter) {
         paymentList.removeAll();
 
         for (PaymentRecord payment : payments) {
+            String cat = payment.getCategory();
             boolean matches = filter.equals("All") ||
-                (filter.equals("Certificate Fees") && payment.getCategory().contains("Certificate")) ||
-                (filter.equals("Clearance Fees") && payment.getCategory().contains("Clearance")) ||
-                (filter.equals("Business Permit") && payment.getCategory().contains("Business")) ||
-                (filter.equals("Service Fees") && payment.getCategory().contains("Service")) ||
-                (filter.equals("Other Income") && payment.getCategory().contains("Other")) ||
-                (filter.equals("Expenses") && !payment.getCategory().toLowerCase().contains("fee") &&
-                 !payment.getCategory().toLowerCase().contains("income") &&
-                 !payment.getCategory().toLowerCase().contains("service"));
-
-            if (matches) {
-                paymentList.add(payment.toString());
-            }
+                (filter.equals("Certificate Fees") && cat.contains("Certificate")) ||
+                (filter.equals("Clearance Fees") && cat.contains("Clearance")) ||
+                (filter.equals("Business Permit") && cat.contains("Business")) ||
+                (filter.equals("Service Fees") && cat.contains("Service")) ||
+                (filter.equals("Other Income") && cat.contains("Other")) ||
+                (filter.equals("Expenses") && cat.contains("Expenses"));
+            if (matches) paymentList.add(payment.toString());
         }
 
         updateStatus("🔍 Filtered payments by category: " + filter, PRIMARY_COLOR);
@@ -2445,13 +3202,8 @@ public class BarangayInfoSys extends Frame {
     }
 
     private void openAnnouncementModule() {
-        if (!hasPermission("ANNOUNCEMENT_MANAGEMENT")) {
-            showError("Access denied. Insufficient permissions for announcement management.");
-            return;
-        }
-
         Frame frame = new Frame("Online Announcement Posting & Management");
-        frame.setSize(800, 600);
+        frame.setSize(700, 500);
         frame.setLayout(new BorderLayout(10, 10));
 
         // Create main panels
@@ -2461,7 +3213,7 @@ public class BarangayInfoSys extends Frame {
 
         // Header with title and stats
         Label headerLabel = new Label("📢 Announcement Management System", Label.CENTER);
-        headerLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        headerLabel.setFont(new Font("Segoe UI", Font.BOLD, 16));
         headerLabel.setForeground(PRIMARY_COLOR);
 
         Panel statsPanel = new Panel(new GridLayout(1, 4, 5, 5));
@@ -2487,6 +3239,7 @@ public class BarangayInfoSys extends Frame {
         Button editBtn = createStyledButton("✏️ Edit Selected", SECONDARY_COLOR);
         Button archiveBtn = createStyledButton("📁 Archive Selected", ACCENT_COLOR);
         Button deleteBtn = createStyledButton("🗑️ Delete Selected", DANGER_COLOR);
+        Button reportBtn = createStyledButton("🚩 Report Selected", new Color(220, 53, 69));
         Button refreshBtn = createStyledButton("🔄 Refresh", SUCCESS_COLOR);
         Button viewBtn = createStyledButton("👁️ View Details", INFO_COLOR);
 
@@ -2494,6 +3247,7 @@ public class BarangayInfoSys extends Frame {
         controlPanel.add(editBtn);
         controlPanel.add(archiveBtn);
         controlPanel.add(deleteBtn);
+        controlPanel.add(reportBtn);
         controlPanel.add(refreshBtn);
         controlPanel.add(viewBtn);
 
@@ -2502,6 +3256,7 @@ public class BarangayInfoSys extends Frame {
         editBtn.addActionListener(e -> editSelectedAnnouncement(frame, announcementList));
         archiveBtn.addActionListener(e -> archiveSelectedAnnouncement(announcementList));
         deleteBtn.addActionListener(e -> deleteSelectedAnnouncement(announcementList));
+        reportBtn.addActionListener(e -> reportSelectedAnnouncement(frame, announcementList));
         refreshBtn.addActionListener(e -> updateAnnouncementList(announcementList));
         viewBtn.addActionListener(e -> viewAnnouncementDetails(frame, announcementList));
 
@@ -2541,13 +3296,6 @@ public class BarangayInfoSys extends Frame {
         priorityChoice.add("Normal");
         priorityChoice.add("Important");
         priorityChoice.add("Urgent");
-
-        CheckboxGroup audienceGroup = new CheckboxGroup();
-        Checkbox allResidents = new Checkbox("All Residents", audienceGroup, true);
-        Checkbox barangayOfficials = new Checkbox("Barangay Officials", audienceGroup, false);
-        Checkbox seniorCitizens = new Checkbox("Senior Citizens", audienceGroup, false);
-        Checkbox youth = new Checkbox("Youth", audienceGroup, false);
-
         // Layout components
         gbc.gridx = 0; gbc.gridy = 0; gbc.anchor = GridBagConstraints.EAST;
         dialog.add(new Label("Title:"), gbc);
@@ -2569,16 +3317,6 @@ public class BarangayInfoSys extends Frame {
         gbc.gridx = 1;
         dialog.add(priorityChoice, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 4; gbc.anchor = GridBagConstraints.EAST;
-        dialog.add(new Label("Target Audience:"), gbc);
-        Panel audiencePanel = new Panel(new GridLayout(2, 2));
-        audiencePanel.add(allResidents);
-        audiencePanel.add(barangayOfficials);
-        audiencePanel.add(seniorCitizens);
-        audiencePanel.add(youth);
-        gbc.gridx = 1;
-        dialog.add(audiencePanel, gbc);
-
         // Buttons
         Panel buttonPanel = new Panel(new FlowLayout());
         Button postButton = createStyledButton("📢 Post Announcement", PRIMARY_COLOR);
@@ -2586,7 +3324,7 @@ public class BarangayInfoSys extends Frame {
         buttonPanel.add(postButton);
         buttonPanel.add(cancelButton);
 
-        gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.CENTER;
+        gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.CENTER;
         dialog.add(buttonPanel, gbc);
 
         // Button actions
@@ -2604,12 +3342,9 @@ public class BarangayInfoSys extends Frame {
             // Create announcement with full details
             Announcement announcement = new Announcement(title, message, category, priority, currentUser.getName());
 
-            // Set target audience
+            // Set default target audience to all residents
             announcement.getTargetAudience().clear();
-            if (allResidents.getState()) announcement.addTargetAudience("All Residents");
-            if (barangayOfficials.getState()) announcement.addTargetAudience("Barangay Officials");
-            if (seniorCitizens.getState()) announcement.addTargetAudience("Senior Citizens");
-            if (youth.getState()) announcement.addTargetAudience("Youth");
+            announcement.addTargetAudience("All Residents");
 
             announcements.add(announcement);
             updateAnnouncementList(list);
@@ -2710,13 +3445,86 @@ public class BarangayInfoSys extends Frame {
         Button closeBtn = createStyledButton("Close", PRIMARY_COLOR);
         closeBtn.addActionListener(e -> dialog.dispose());
 
+        Button reportBtn = createStyledButton("🚩 Report", new Color(220, 53, 69));
+        reportBtn.addActionListener(e -> reportAnnouncement(dialog, announcement, list));
+
+        Panel buttonPanel = new Panel(new FlowLayout(FlowLayout.CENTER, 10, 10));
+        buttonPanel.add(reportBtn);
+        buttonPanel.add(closeBtn);
+
         dialog.add(details, BorderLayout.CENTER);
-        dialog.add(closeBtn, BorderLayout.SOUTH);
+        dialog.add(buttonPanel, BorderLayout.SOUTH);
 
         dialog.addWindowListener(new WindowAdapter() {
             public void windowClosing(WindowEvent e) { dialog.dispose(); }
         });
         dialog.setVisible(true);
+    }
+
+    private void reportSelectedAnnouncement(Frame parent, java.awt.List list) {
+        int idx = list.getSelectedIndex();
+        if (idx < 0 || idx >= announcements.size()) {
+            showError("Please select an announcement to report.");
+            return;
+        }
+        reportAnnouncement(parent, announcements.get(idx), list);
+    }
+
+    private void reportAnnouncement(java.awt.Window parent, Announcement announcement, java.awt.List list) {
+        Dialog reportDialog = new Dialog(parent, "Report Announcement", Dialog.ModalityType.APPLICATION_MODAL);
+        reportDialog.setSize(420, 320);
+        reportDialog.setLayout(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(6, 6, 6, 6);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        Label reasonLabel = new Label("Reason for report:");
+        Choice reasonChoice = new Choice();
+        reasonChoice.add("Spam");
+        reasonChoice.add("Inappropriate");
+        reasonChoice.add("False Information");
+        reasonChoice.add("Harassment");
+        reasonChoice.add("Other");
+
+        Label noteLabel = new Label("Additional details:");
+        TextArea noteArea = new TextArea(5, 30);
+
+        gbc.gridx = 0; gbc.gridy = 0; gbc.anchor = GridBagConstraints.WEST;
+        reportDialog.add(reasonLabel, gbc);
+        gbc.gridy = 1;
+        reportDialog.add(reasonChoice, gbc);
+
+        gbc.gridy = 2;
+        reportDialog.add(noteLabel, gbc);
+        gbc.gridy = 3; gbc.fill = GridBagConstraints.BOTH;
+        reportDialog.add(noteArea, gbc);
+
+        Button submitBtn = createStyledButton("Submit", new Color(220, 53, 69));
+        Button cancelBtn = createStyledButton("Cancel", DANGER_COLOR);
+        Panel buttonPanel = new Panel(new FlowLayout(FlowLayout.CENTER, 10, 10));
+        buttonPanel.add(submitBtn);
+        buttonPanel.add(cancelBtn);
+
+        gbc.gridy = 4; gbc.fill = GridBagConstraints.NONE;
+        reportDialog.add(buttonPanel, gbc);
+
+        submitBtn.addActionListener(e -> {
+            String reason = reasonChoice.getSelectedItem();
+            String details = noteArea.getText().trim();
+            String finalReason = reason + (details.isEmpty() ? "" : ": " + details);
+            announcement.addReport(finalReason);
+            updateAnnouncementList(list);
+            JOptionPane.showMessageDialog(reportDialog,
+                "Thank you. The announcement has been reported and will be reviewed.",
+                "Report Submitted", JOptionPane.INFORMATION_MESSAGE);
+            reportDialog.dispose();
+        });
+
+        cancelBtn.addActionListener(e -> reportDialog.dispose());
+        reportDialog.addWindowListener(new WindowAdapter() {
+            public void windowClosing(WindowEvent e) { reportDialog.dispose(); }
+        });
+        reportDialog.setVisible(true);
     }
 
     private void updateAnnouncementList(java.awt.List list) {
@@ -2725,9 +3533,10 @@ public class BarangayInfoSys extends Frame {
             String statusIcon = "Active".equals(a.getStatus()) ? "📢" : "📁";
             String priorityIcon = "Urgent".equals(a.getPriority()) ? "🚨" :
                                  "Important".equals(a.getPriority()) ? "⚠️" : "ℹ️";
-            list.add(String.format("%s %s %s - %s (%s) - %s",
+            String reportIcon = a.getReportCount() > 0 ? " 🚩" + a.getReportCount() : "";
+            list.add(String.format("%s %s %s - %s (%s) - %s%s",
                 statusIcon, priorityIcon, a.getTitle(), a.getCategory(),
-                a.getPriority(), a.getPostDate()));
+                a.getPriority(), a.getPostDate(), reportIcon));
         }
     }
 
@@ -2797,6 +3606,19 @@ public class BarangayInfoSys extends Frame {
         refreshBtn.addActionListener(e -> updateUserList(userList));
         viewDetailsBtn.addActionListener(e -> viewUserDetails(frame, userList));
 
+        Button userBarcodeBtn = createStyledButton("🔲 Show Barcode", new Color(75, 0, 130));
+        controlPanel.add(userBarcodeBtn);
+        userBarcodeBtn.addActionListener(e -> {
+            int idx = userList.getSelectedIndex();
+            if (idx < 0 || idx >= systemUsers.size()) {
+                showError("Please select a user to show barcode.");
+                return;
+            }
+            SystemUser u = systemUsers.get(idx);
+            BarcodeGenerator.showBarcodeWindow(frame, u.getBarcodeId(),
+                u.getName() + " | " + u.getRole());
+        });
+
         // Layout assembly
         listPanel.add(new Label("System Users:"), BorderLayout.NORTH);
         listPanel.add(userList, BorderLayout.CENTER);
@@ -2804,6 +3626,177 @@ public class BarangayInfoSys extends Frame {
         frame.add(topPanel, BorderLayout.NORTH);
         frame.add(listPanel, BorderLayout.CENTER);
         frame.add(controlPanel, BorderLayout.SOUTH);
+
+        frame.addWindowListener(new WindowAdapter() {
+            public void windowClosing(WindowEvent e) { frame.dispose(); }
+        });
+        frame.setVisible(true);
+    }
+
+    private void openReportNewsModule() {
+        Frame frame = new Frame("📰 Report News - " + currentUser.getName());
+        frame.setSize(700, 500);
+        frame.setLayout(new BorderLayout(10, 10));
+
+        // Header
+        Panel headerPanel = new Panel(new BorderLayout());
+        Label title = new Label("Report News & Community Updates");
+        title.setFont(new Font("Arial", Font.BOLD, 16));
+        title.setForeground(PRIMARY_COLOR);
+        headerPanel.add(title, BorderLayout.CENTER);
+
+        // Instructions
+        Label instructions = new Label("Use this form to report news, events, or important community updates that should be shared with residents.");
+        instructions.setFont(new Font("Arial", Font.PLAIN, 12));
+        headerPanel.add(instructions, BorderLayout.SOUTH);
+
+        // Form panel
+        Panel formPanel = new Panel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        // Form fields
+        Label titleLabel = new Label("News Title:");
+        TextField newsTitleField = new TextField(40);
+
+        Label categoryLabel = new Label("Category:");
+        Choice categoryChoice = new Choice();
+        categoryChoice.add("Community Event");
+        categoryChoice.add("Public Announcement");
+        categoryChoice.add("Emergency Alert");
+        categoryChoice.add("Local News");
+        categoryChoice.add("Government Update");
+        categoryChoice.add("Other");
+
+        Label priorityLabel = new Label("Priority:");
+        Choice priorityChoice = new Choice();
+        priorityChoice.add("Normal");
+        priorityChoice.add("Important");
+        priorityChoice.add("Urgent");
+
+        Label descriptionLabel = new Label("Description/Details:");
+        TextArea descriptionArea = new TextArea(8, 40);
+        descriptionArea.setFont(new Font("Arial", Font.PLAIN, 12));
+
+        Label locationLabel = new Label("Location (if applicable):");
+        TextField locationField = new TextField(40);
+
+        Label contactLabel = new Label("Contact Information:");
+        TextField contactField = new TextField(40);
+
+        // Layout components
+        gbc.gridx = 0; gbc.gridy = 0; gbc.anchor = GridBagConstraints.EAST;
+        formPanel.add(titleLabel, gbc);
+        gbc.gridx = 1;
+        formPanel.add(newsTitleField, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 1;
+        formPanel.add(categoryLabel, gbc);
+        gbc.gridx = 1;
+        formPanel.add(categoryChoice, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 2;
+        formPanel.add(priorityLabel, gbc);
+        gbc.gridx = 1;
+        formPanel.add(priorityChoice, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 3; gbc.anchor = GridBagConstraints.NORTHEAST;
+        formPanel.add(descriptionLabel, gbc);
+        gbc.gridx = 1; gbc.fill = GridBagConstraints.BOTH;
+        formPanel.add(descriptionArea, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 4; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.anchor = GridBagConstraints.EAST;
+        formPanel.add(locationLabel, gbc);
+        gbc.gridx = 1;
+        formPanel.add(locationField, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 5;
+        formPanel.add(contactLabel, gbc);
+        gbc.gridx = 1;
+        formPanel.add(contactField, gbc);
+
+        // Button panel
+        Panel buttonPanel = new Panel(new FlowLayout(FlowLayout.CENTER, 10, 10));
+        Button submitButton = createStyledButton("📤 Submit News Report", PRIMARY_COLOR);
+        Button clearButton = createStyledButton("🧹 Clear Form", ACCENT_COLOR);
+        Button cancelButton = createStyledButton("❌ Cancel", DANGER_COLOR);
+
+        buttonPanel.add(submitButton);
+        buttonPanel.add(clearButton);
+        buttonPanel.add(cancelButton);
+
+        // Button actions
+        submitButton.addActionListener(e -> {
+            String newsTitle = newsTitleField.getText().trim();
+            String category = categoryChoice.getSelectedItem();
+            String priority = priorityChoice.getSelectedItem();
+            String description = descriptionArea.getText().trim();
+            String location = locationField.getText().trim();
+            String contact = contactField.getText().trim();
+
+            if (newsTitle.isEmpty() || description.isEmpty()) {
+                JOptionPane.showMessageDialog(frame, "Please fill in at least the title and description.", "Missing Information", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            // Create news report as an announcement
+            String fullMessage = description;
+            if (!location.isEmpty()) {
+                fullMessage += "\n\nLocation: " + location;
+            }
+            if (!contact.isEmpty()) {
+                fullMessage += "\n\nContact: " + contact;
+            }
+            fullMessage += "\n\nReported by: " + currentUser.getName() + " (" + currentUser.getRole() + ")";
+
+            Announcement newsReport = new Announcement(
+                newsTitle,
+                fullMessage,
+                category,
+                priority,
+                currentUser.getName()
+            );
+
+            // Add target audience based on category/priority
+            if ("Emergency Alert".equals(category) || "Urgent".equals(priority)) {
+                newsReport.addTargetAudience("All Residents");
+                newsReport.addTargetAudience("Barangay Officials");
+            } else {
+                newsReport.addTargetAudience("All Residents");
+            }
+
+            announcements.add(newsReport);
+
+            JOptionPane.showMessageDialog(frame,
+                "News report submitted successfully!\n\nTitle: " + newsTitle + "\nCategory: " + category + "\nPriority: " + priority,
+                "News Report Submitted",
+                JOptionPane.INFORMATION_MESSAGE);
+
+            // Clear form
+            newsTitleField.setText("");
+            descriptionArea.setText("");
+            locationField.setText("");
+            contactField.setText("");
+            categoryChoice.select(0);
+            priorityChoice.select(0);
+        });
+
+        clearButton.addActionListener(e -> {
+            newsTitleField.setText("");
+            descriptionArea.setText("");
+            locationField.setText("");
+            contactField.setText("");
+            categoryChoice.select(0);
+            priorityChoice.select(0);
+        });
+
+        cancelButton.addActionListener(e -> frame.dispose());
+
+        // Layout assembly
+        frame.add(headerPanel, BorderLayout.NORTH);
+        frame.add(formPanel, BorderLayout.CENTER);
+        frame.add(buttonPanel, BorderLayout.SOUTH);
 
         frame.addWindowListener(new WindowAdapter() {
             public void windowClosing(WindowEvent e) { frame.dispose(); }
@@ -2862,7 +3855,7 @@ public class BarangayInfoSys extends Frame {
 
         // Buttons
         Panel buttonPanel = new Panel(new FlowLayout());
-        Button createButton = createStyledButton("✅ Create User", PRIMARY_COLOR);
+        Button createButton = createStyledButton("Create User", PRIMARY_COLOR);
         Button cancelButton = createStyledButton("❌ Cancel", DANGER_COLOR);
         buttonPanel.add(createButton);
         buttonPanel.add(cancelButton);
@@ -2879,7 +3872,11 @@ public class BarangayInfoSys extends Frame {
             String department = departmentChoice.getSelectedItem();
 
             if (name.isEmpty() || email.isEmpty() || barcode.isEmpty()) {
-                showError("Name, email, and barcode ID are required.");
+                JOptionPane.showMessageDialog(dialog, "Name, email, and barcode ID are required.");
+                return;
+            }
+            if (!email.contains("@")) {
+                JOptionPane.showMessageDialog(dialog, "Please enter a valid email address!");
                 return;
             }
 
@@ -2887,13 +3884,14 @@ public class BarangayInfoSys extends Frame {
             boolean duplicateBarcode = systemUsers.stream()
                 .anyMatch(u -> barcode.equals(u.getBarcodeId()));
             if (duplicateBarcode) {
-                showError("Barcode ID already exists. Please use a unique barcode.");
+                JOptionPane.showMessageDialog(dialog, "Barcode ID already exists. Please use a unique barcode.");
                 return;
             }
 
             SystemUser newUser = new SystemUser(name, email, role, barcode);
             newUser.setDepartment(department);
             systemUsers.add(newUser);
+            dbManager.saveSystemUser(newUser);
             updateUserList(list);
             updateStatus("👤 User created successfully: " + name, SUCCESS_COLOR);
             dialog.dispose();
@@ -2930,7 +3928,7 @@ public class BarangayInfoSys extends Frame {
         roleChoice.add("Administrator");
         roleChoice.add("Staff");
         roleChoice.add("Viewer");
-        roleChoice.select(user.getRole());
+        try { roleChoice.select(user.getRole()); } catch (Exception ex) { roleChoice.select(0); }
 
         Choice departmentChoice = new Choice();
         departmentChoice.add("General");
@@ -2938,7 +3936,7 @@ public class BarangayInfoSys extends Frame {
         departmentChoice.add("Finance");
         departmentChoice.add("Services");
         departmentChoice.add("Security");
-        departmentChoice.select(user.getDepartment());
+        try { departmentChoice.select(user.getDepartment()); } catch (Exception ex) { departmentChoice.select(0); }
 
         // Layout components (similar to add user)
         gbc.gridx = 0; gbc.gridy = 0; gbc.anchor = GridBagConstraints.EAST;
@@ -2985,25 +3983,31 @@ public class BarangayInfoSys extends Frame {
             String department = departmentChoice.getSelectedItem();
 
             if (name.isEmpty() || email.isEmpty() || barcode.isEmpty()) {
-                showError("Name, email, and barcode ID are required.");
+                JOptionPane.showMessageDialog(dialog, "Name, email, and barcode ID are required.");
+                return;
+            }
+            if (!email.contains("@")) {
+                JOptionPane.showMessageDialog(dialog, "Please enter a valid email address!");
                 return;
             }
 
             // Check for duplicate barcode (excluding current user)
             final String finalBarcode = barcode;
-            final SystemUser currentUser = user;
+            final SystemUser selectedUser = user;
             boolean duplicateBarcode = systemUsers.stream()
-                .filter(u -> u != currentUser)
+                .filter(u -> u != selectedUser)
                 .anyMatch(u -> finalBarcode.equals(u.getBarcodeId()));
             if (duplicateBarcode) {
-                showError("Barcode ID already exists. Please use a unique barcode.");
+                JOptionPane.showMessageDialog(dialog, "Barcode ID already exists. Please use a unique barcode.");
                 return;
             }
 
-            SystemUser updatedUser = new SystemUser(name, email, role, barcode);
-            updatedUser.setDepartment(department);
-            updatedUser.setActive(systemUsers.get(idx).isActive());
-            systemUsers.set(idx, updatedUser);
+            user.setName(name);
+            user.setEmail(email);
+            user.setBarcodeId(barcode);
+            user.setRole(role);
+            user.setDepartment(department);
+            dbManager.saveSystemUser(user);
             updateUserList(list);
             updateStatus("✏️ User updated successfully: " + name, SUCCESS_COLOR);
             dialog.dispose();
@@ -3026,6 +4030,7 @@ public class BarangayInfoSys extends Frame {
 
         SystemUser user = systemUsers.get(idx);
         user.setActive(!user.isActive());
+        dbManager.saveSystemUser(user);
         updateUserList(list);
         String status = user.isActive() ? "activated" : "deactivated";
         updateStatus("🔄 User " + status + ": " + user.getName(), ACCENT_COLOR);
@@ -3044,8 +4049,9 @@ public class BarangayInfoSys extends Frame {
         dialog.setSize(600, 500);
         dialog.setLayout(new BorderLayout());
 
-        Panel permissionPanel = new Panel(new GridLayout(0, 2, 10, 5));
-        java.util.List<Checkbox> checkboxes = new java.util.ArrayList<>();
+        Panel permissionPanel = new Panel(new GridLayout(0, 3, 10, 5));
+        java.util.List<Button> permissionButtons = new java.util.ArrayList<>();
+        java.util.List<String> selectedPermissions = new java.util.ArrayList<>(user.getPermissions());
 
         String[] allPermissions = {
             "READ_RESIDENTS", "WRITE_RESIDENTS", "DELETE_RESIDENTS",
@@ -3057,9 +4063,18 @@ public class BarangayInfoSys extends Frame {
         };
 
         for (String perm : allPermissions) {
-            Checkbox cb = new Checkbox(perm, user.hasPermission(perm));
-            permissionPanel.add(cb);
-            checkboxes.add(cb);
+            Button btn = createStyledButton(perm, selectedPermissions.contains(perm) ? SUCCESS_COLOR : SECONDARY_COLOR);
+            btn.addActionListener(e -> {
+                if (selectedPermissions.contains(perm)) {
+                    selectedPermissions.remove(perm);
+                    btn.setBackground(SECONDARY_COLOR);
+                } else {
+                    selectedPermissions.add(perm);
+                    btn.setBackground(SUCCESS_COLOR);
+                }
+            });
+            permissionPanel.add(btn);
+            permissionButtons.add(btn);
         }
 
         Panel buttonPanel = new Panel(new FlowLayout());
@@ -3070,11 +4085,8 @@ public class BarangayInfoSys extends Frame {
 
         saveButton.addActionListener(e -> {
             user.getPermissions().clear();
-            for (Checkbox cb : checkboxes) {
-                if (cb.getState()) {
-                    user.getPermissions().add(cb.getLabel());
-                }
-            }
+            user.getPermissions().addAll(selectedPermissions);
+            dbManager.saveSystemUser(user);
             updateStatus("🔐 Permissions updated for: " + user.getName(), SUCCESS_COLOR);
             dialog.dispose();
         });
@@ -3112,6 +4124,7 @@ public class BarangayInfoSys extends Frame {
 
         if (confirm == JOptionPane.YES_OPTION) {
             systemUsers.remove(idx);
+            dbManager.deleteSystemUser(user.getId());
             updateUserList(list);
             updateStatus("🗑️ User deleted: " + user.getName(), DANGER_COLOR);
         }
@@ -3256,132 +4269,200 @@ public class BarangayInfoSys extends Frame {
      * - Session tracking with user information
      */
     private static void showLoginScreen() {
-        Frame loginFrame = new Frame("🏷️ Barangay Information System - Barcode Login");
-        loginFrame.setSize(500, 300);
-        loginFrame.setLayout(new GridBagLayout());
-        loginFrame.setBackground(new Color(245, 245, 245));
+        Frame loginFrame = new Frame("�️ Barangay San Lorenza Information System - Modern Login");
+        loginFrame.setSize(600, 400);
+        loginFrame.setLayout(new BorderLayout());
+        loginFrame.setBackground(new Color(34, 139, 34)); // Forest Green background
+
+        // Modern gradient background panel
+        Panel backgroundPanel = new ModernLoginPanel();
+        backgroundPanel.setLayout(new GridBagLayout());
 
         GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(8, 12, 8, 12);
+        gbc.insets = new Insets(15, 20, 15, 20);
         gbc.fill = GridBagConstraints.HORIZONTAL;
 
-        // Title
-        Label titleLabel = new Label("🔐 Secure Login Portal");
-        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 16));
-        titleLabel.setAlignment(Label.CENTER);
+        // Modern title with icon
+        Panel titlePanel = new Panel(new FlowLayout(FlowLayout.CENTER));
+        titlePanel.setBackground(new Color(0, 0, 0, 0)); // Transparent
+
+        Label iconLabel = new Label("🏘️");
+        iconLabel.setFont(new Font("Segoe UI", Font.PLAIN, 48));
+        titlePanel.add(iconLabel);
+
         gbc.gridx = 0;
         gbc.gridy = 0;
-        gbc.gridwidth = 3;
-        loginFrame.add(titleLabel, gbc);
+        gbc.gridwidth = 2;
+        backgroundPanel.add(titlePanel, gbc);
 
-        // Instructions
-        Label instruction = new Label("Scan your barcode ID or enter your credentials:");
-        instruction.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        instruction.setAlignment(Label.CENTER);
+        Label titleLabel = new Label("Barangay San Lorenza");
+        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 24));
+        titleLabel.setForeground(Color.WHITE);
+        titleLabel.setAlignment(Label.CENTER);
+
         gbc.gridy = 1;
-        loginFrame.add(instruction, gbc);
+        backgroundPanel.add(titleLabel, gbc);
 
-        // Barcode input section
-        Panel inputPanel = new Panel(new BorderLayout(5, 5));
-        inputPanel.setBackground(new Color(255, 255, 255));
-
-        Label barcodeIcon = new Label("📱");
-        barcodeIcon.setFont(new Font("Segoe UI", Font.PLAIN, 20));
-        inputPanel.add(barcodeIcon, BorderLayout.WEST);
-
-        TextField barcodeField = new TextField(25);
-        barcodeField.setFont(new Font("Segoe UI", Font.BOLD, 14));
-        barcodeField.setBackground(new Color(255, 255, 255));
-        barcodeField.setForeground(new Color(33, 37, 41));
-        inputPanel.add(barcodeField, BorderLayout.CENTER);
+        Label subtitleLabel = new Label("Information Management System");
+        subtitleLabel.setFont(new Font("Segoe UI", Font.PLAIN, 16));
+        subtitleLabel.setForeground(new Color(200, 255, 200));
+        subtitleLabel.setAlignment(Label.CENTER);
 
         gbc.gridy = 2;
-        gbc.gridwidth = 2;
-        loginFrame.add(inputPanel, gbc);
+        backgroundPanel.add(subtitleLabel, gbc);
 
-        // Scan button
-        Button scanButton = new Button("📷 Scan Barcode");
-        scanButton.setFont(new Font("Segoe UI", Font.BOLD, 12));
-        scanButton.setBackground(new Color(0, 123, 255));
-        scanButton.setForeground(Color.WHITE);
-        gbc.gridx = 2;
-        gbc.gridwidth = 1;
-        gbc.fill = GridBagConstraints.NONE;
-        loginFrame.add(scanButton, gbc);
+        // Modern input section
+        Panel inputContainer = new Panel(new BorderLayout(10, 10));
+        inputContainer.setBackground(new Color(255, 255, 255, 220)); // Semi-transparent white
+        inputContainer.setPreferredSize(new Dimension(400, 80));
 
-        // Status feedback
-        Label feedback = new Label("Ready to scan...");
-        feedback.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        feedback.setForeground(new Color(0, 123, 255));
-        feedback.setAlignment(Label.CENTER);
-        gbc.gridx = 0;
+        Label inputIcon = new Label("🔐");
+        inputIcon.setFont(new Font("Segoe UI", Font.PLAIN, 24));
+        inputContainer.add(inputIcon, BorderLayout.WEST);
+
+        TextField barcodeField = new TextField(30);
+        barcodeField.setFont(new Font("Segoe UI", Font.BOLD, 16));
+        barcodeField.setBackground(Color.WHITE);
+        barcodeField.setForeground(new Color(34, 139, 34));
+        barcodeField.setText("Enter barcode ID, email, or scan...");
+        barcodeField.setForeground(Color.GRAY);
+
+        // Modern placeholder effect
+        barcodeField.addFocusListener(new FocusAdapter() {
+            public void focusGained(FocusEvent e) {
+                if (barcodeField.getText().equals("Enter barcode ID, email, or scan...")) {
+                    barcodeField.setText("");
+                    barcodeField.setForeground(new Color(34, 139, 34));
+                }
+            }
+            public void focusLost(FocusEvent e) {
+                if (barcodeField.getText().isEmpty()) {
+                    barcodeField.setText("Enter barcode ID, email, or scan...");
+                    barcodeField.setForeground(Color.GRAY);
+                }
+            }
+        });
+
+        inputContainer.add(barcodeField, BorderLayout.CENTER);
+
         gbc.gridy = 3;
-        gbc.gridwidth = 3;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        loginFrame.add(feedback, gbc);
+        gbc.gridwidth = 2;
+        backgroundPanel.add(inputContainer, gbc);
+
+        // Modern status feedback
+        Label feedback = new Label("Ready for authentication...");
+        feedback.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        feedback.setForeground(new Color(200, 255, 200));
+        feedback.setAlignment(Label.CENTER);
+
+        gbc.gridy = 4;
+        backgroundPanel.add(feedback, gbc);
 
         // User info display
         Label userInfo = new Label(" ");
-        userInfo.setFont(new Font("Segoe UI", Font.PLAIN, 10));
-        userInfo.setForeground(new Color(108, 117, 125));
+        userInfo.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        userInfo.setForeground(new Color(255, 255, 200));
         userInfo.setAlignment(Label.CENTER);
-        gbc.gridy = 4;
-        loginFrame.add(userInfo, gbc);
-
-        // Buttons panel
-        Panel buttons = new Panel(new FlowLayout(FlowLayout.CENTER, 15, 5));
-        Button loginButton = new Button("🔓 Login");
-        loginButton.setFont(new Font("Segoe UI", Font.BOLD, 12));
-        loginButton.setBackground(new Color(40, 167, 69));
-        loginButton.setForeground(Color.WHITE);
-
-        Button guestButton = new Button("👤 Continue as Guest");
-        guestButton.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        guestButton.setBackground(new Color(108, 117, 125));
-        guestButton.setForeground(Color.WHITE);
-
-        Button exitButton = new Button("❌ Exit");
-        exitButton.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        exitButton.setBackground(new Color(220, 53, 69));
-        exitButton.setForeground(Color.WHITE);
-
-        buttons.add(loginButton);
-        buttons.add(guestButton);
-        buttons.add(exitButton);
 
         gbc.gridy = 5;
-        loginFrame.add(buttons, gbc);
+        backgroundPanel.add(userInfo, gbc);
 
-        // Enhanced login logic with better feedback
+        // Modern hint text
+        Label hintLabel = new Label("💡 Use the buttons below or press Enter to login");
+        hintLabel.setFont(new Font("Segoe UI", Font.ITALIC, 11));
+        hintLabel.setForeground(new Color(200, 255, 200));
+        hintLabel.setAlignment(Label.CENTER);
+
+        gbc.gridy = 6;
+        backgroundPanel.add(hintLabel, gbc);
+
+        // Modern Glassy Buttons Panel with labels underneath
+        Panel buttonsPanel = new Panel(new FlowLayout(FlowLayout.CENTER, 25, 10));
+        buttonsPanel.setBackground(new Color(0, 0, 0, 0)); // Transparent
+
+        // Create modern glassy buttons in requested order
+        GlassyButton scanButton = new GlassyButton("📷 Scan", new Color(52, 152, 219));
+        scanButton.setPreferredSize(new Dimension(140, 40));
+        Panel scanContainer = new Panel(new GridLayout(2, 1, 0, 5));
+        scanContainer.setBackground(new Color(0, 0, 0, 0));
+        scanContainer.add(scanButton);
+        Label scanLabel = new Label("Scan with Barcode", Label.CENTER);
+        scanLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        scanLabel.setForeground(new Color(200, 255, 200));
+        scanContainer.add(scanLabel);
+
+        GlassyButton loginButton = new GlassyButton("🔓 Login", new Color(46, 204, 113));
+        loginButton.setPreferredSize(new Dimension(120, 40));
+        Panel loginContainer = new Panel(new GridLayout(2, 1, 0, 5));
+        loginContainer.setBackground(new Color(0, 0, 0, 0));
+        loginContainer.add(loginButton);
+        Label loginLabel = new Label("Login", Label.CENTER);
+        loginLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        loginLabel.setForeground(new Color(200, 255, 200));
+        loginContainer.add(loginLabel);
+
+        GlassyButton guestButton = new GlassyButton("👤 Guest", new Color(108, 117, 125));
+        guestButton.setPreferredSize(new Dimension(160, 40));
+        Panel guestContainer = new Panel(new GridLayout(2, 1, 0, 5));
+        guestContainer.setBackground(new Color(0, 0, 0, 0));
+        guestContainer.add(guestButton);
+        Label guestLabel = new Label("Continue as Guest", Label.CENTER);
+        guestLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        guestLabel.setForeground(new Color(200, 255, 200));
+        guestContainer.add(guestLabel);
+
+        GlassyButton barcodeGenButton = new GlassyButton("🔲 Barcode", new Color(75, 0, 130));
+        barcodeGenButton.setPreferredSize(new Dimension(140, 40));
+        Panel barcodeGenContainer = new Panel(new GridLayout(2, 1, 0, 5));
+        barcodeGenContainer.setBackground(new Color(0, 0, 0, 0));
+        barcodeGenContainer.add(barcodeGenButton);
+        Label barcodeGenLabel = new Label("Barcode Generator", Label.CENTER);
+        barcodeGenLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        barcodeGenLabel.setForeground(new Color(200, 255, 200));
+        barcodeGenContainer.add(barcodeGenLabel);
+
+        buttonsPanel.add(scanContainer);
+        buttonsPanel.add(loginContainer);
+        buttonsPanel.add(guestContainer);
+        buttonsPanel.add(barcodeGenContainer);
+
+        gbc.gridy = 7;
+        backgroundPanel.add(buttonsPanel, gbc);
+
+        barcodeGenButton.addActionListener(e -> openLoginBarcodeTool(loginFrame));
+
+        loginFrame.add(backgroundPanel, BorderLayout.CENTER);
+
+        // Enhanced modern login logic
         ActionListener doLogin = e -> {
             String code = barcodeField.getText().trim();
-            SystemUser loggedInUser;
 
-            if (code.isEmpty()) {
-                feedback.setText("Please enter a barcode ID or email address");
-                feedback.setForeground(new Color(220, 53, 69));
+            // Handle placeholder text
+            if (code.equals("Enter barcode ID, email, or scan...") || code.isEmpty()) {
+                feedback.setText("Please enter your credentials or press Enter for guest access");
+                feedback.setForeground(new Color(255, 200, 200));
                 barcodeField.requestFocus();
                 return;
             }
 
             feedback.setText("Authenticating...");
-            feedback.setForeground(new Color(255, 193, 7));
+            feedback.setForeground(new Color(255, 255, 200));
 
-            loggedInUser = authenticateBarcode(code);
+            SystemUser loggedInUser = authenticateBarcode(code);
             if (loggedInUser == null) {
                 loggedInUser = createUserFromInput(code);
-                feedback.setText("New user created: " + loggedInUser.getName());
-                feedback.setForeground(new Color(40, 167, 69));
-                userInfo.setText("Welcome, " + loggedInUser.getName() + " (" + loggedInUser.getRole() + ")");
+                feedback.setText("Welcome, new user: " + loggedInUser.getName());
+                feedback.setForeground(new Color(200, 255, 200));
+                userInfo.setText("Role: " + loggedInUser.getRole());
             } else {
                 feedback.setText("Authentication successful!");
-                feedback.setForeground(new Color(40, 167, 69));
-                userInfo.setText("Welcome back, " + loggedInUser.getName() + " (" + loggedInUser.getRole() + ")");
+                feedback.setForeground(new Color(200, 255, 200));
+                userInfo.setText("Welcome back, " + loggedInUser.getName());
             }
 
-            // Brief delay to show feedback
+            // Modern smooth transition
             final SystemUser finalLoggedInUser = loggedInUser;
-            Timer timer = new Timer(1000, evt -> {
+            Timer timer = new Timer(1200, evt -> {
                 loginFrame.dispose();
                 new BarangayInfoSys(finalLoggedInUser);
             });
@@ -3389,24 +4470,10 @@ public class BarangayInfoSys extends Frame {
             timer.start();
         };
 
-        ActionListener doGuestLogin = e -> {
-            SystemUser guestUser = new SystemUser("Guest", "guest@barangay.local", "Guest", "GUEST");
-            feedback.setText("Continuing as guest...");
-            feedback.setForeground(new Color(108, 117, 125));
-            userInfo.setText("Welcome, Guest User");
-
-            Timer timer = new Timer(800, evt -> {
-                loginFrame.dispose();
-                new BarangayInfoSys(guestUser);
-            });
-            timer.setRepeats(false);
-            timer.start();
-        };
-
-        // Scan button functionality (simulates barcode scanner)
+        barcodeField.addActionListener(doLogin);
         scanButton.addActionListener(e -> {
             feedback.setText("Scanner activated - Please scan barcode...");
-            feedback.setForeground(new Color(0, 123, 255));
+            feedback.setForeground(new Color(100, 200, 255));
             barcodeField.setText("");
             barcodeField.requestFocus();
 
@@ -3417,12 +4484,22 @@ public class BarangayInfoSys extends Frame {
             scanTimer.setRepeats(false);
             scanTimer.start();
         });
-
-        barcodeField.addActionListener(doLogin);
         loginButton.addActionListener(doLogin);
-        guestButton.addActionListener(doGuestLogin);
-        exitButton.addActionListener(e -> System.exit(0));
+        guestButton.addActionListener(e -> {
+            SystemUser guestUser = new SystemUser("Guest", "guest@barangay.local", "Guest", "GUEST");
+            feedback.setText("Continuing as guest...");
+            feedback.setForeground(new Color(200, 255, 200));
+            userInfo.setText("Guest access activated");
 
+            Timer timer = new Timer(800, evt -> {
+                loginFrame.dispose();
+                new BarangayInfoSys(guestUser);
+            });
+            timer.setRepeats(false);
+            timer.start();
+        });
+
+        // Modern window controls
         loginFrame.addWindowListener(new WindowAdapter() {
             public void windowClosing(WindowEvent e) {
                 System.exit(0);
@@ -3432,10 +4509,12 @@ public class BarangayInfoSys extends Frame {
         loginFrame.setLocationRelativeTo(null);
         loginFrame.setVisible(true);
 
-        // Auto-focus on barcode field
+        // Auto-focus with modern effect
         loginFrame.addWindowListener(new WindowAdapter() {
             public void windowOpened(WindowEvent e) {
-                barcodeField.requestFocus();
+                Timer focusTimer = new Timer(300, evt -> barcodeField.requestFocus());
+                focusTimer.setRepeats(false);
+                focusTimer.start();
             }
         });
     }
@@ -3502,13 +4581,104 @@ public class BarangayInfoSys extends Frame {
 
         // Predefined system users with barcode IDs
         // Barcode IDs are designed to be easily scannable (alphanumeric, fixed length)
-        users.add(new SystemUser("Administrator", "admin@barangay.local", "Administrator", "ADM2024001"));
-        users.add(new SystemUser("Maria Santos", "maria.santos@barangay.local", "Staff", "STF2024002"));
-        users.add(new SystemUser("Juan dela Cruz", "juan.delacruz@barangay.local", "Staff", "STF2024003"));
-        users.add(new SystemUser("Ana Reyes", "ana.reyes@barangay.local", "Viewer", "VWR2024004"));
-        users.add(new SystemUser("Pedro Garcia", "pedro.garcia@barangay.local", "Viewer", "VWR2024005"));
-
+        users.add(new SystemUser("Administrator", "jpleano8@gmail.com", "Administrator", "ADM2024001"));
         return users;
+    }
+
+    private static void openLoginBarcodeTool(Frame parent) {
+        Frame frame = new Frame("🔲 Barcode Generator");
+        frame.setSize(600, 420);
+        frame.setLayout(new BorderLayout(10, 10));
+        frame.setBackground(Color.WHITE);
+
+        Panel headerPanel = new Panel(new FlowLayout(FlowLayout.CENTER));
+        headerPanel.setBackground(new Color(75, 0, 130));
+        Label headerLabel = new Label("🔲 Barcode Generator", Label.CENTER);
+        headerLabel.setFont(new Font("Segoe UI", Font.BOLD, 16));
+        headerLabel.setForeground(Color.WHITE);
+        headerPanel.add(headerLabel);
+
+        Panel inputPanel = new Panel(new FlowLayout(FlowLayout.CENTER, 10, 10));
+        inputPanel.setBackground(new Color(245, 245, 255));
+        Label inputLabel = new Label("Enter text to encode:");
+        inputLabel.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        TextField inputField = new TextField(30);
+        inputField.setFont(new Font("Monospaced", Font.PLAIN, 14));
+        Button generateBtn = new Button("Generate");
+        generateBtn.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        inputPanel.add(inputLabel);
+        inputPanel.add(inputField);
+        inputPanel.add(generateBtn);
+
+        final BufferedImage[] imgHolder = { BarcodeGenerator.generate("SAMPLE", 2, 80) };
+        Canvas canvas = new Canvas() {
+            public void paint(Graphics g) {
+                g.setColor(Color.WHITE);
+                g.fillRect(0, 0, getWidth(), getHeight());
+                int x = (getWidth() - imgHolder[0].getWidth()) / 2;
+                g.drawImage(imgHolder[0], x, 10, this);
+            }
+            public Dimension getPreferredSize() { return new Dimension(560, 130); }
+        };
+        canvas.setBackground(Color.WHITE);
+
+        Panel btnPanel = new Panel(new FlowLayout(FlowLayout.CENTER, 15, 8));
+        btnPanel.setBackground(Color.WHITE);
+        Button printBtn = new Button("🖨️ Print");
+        printBtn.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        Button closeBtn = new Button("Close");
+        closeBtn.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        btnPanel.add(printBtn);
+        btnPanel.add(closeBtn);
+
+        ActionListener doGenerate = e -> {
+            String text = inputField.getText().trim();
+            if (text.isEmpty()) {
+                JOptionPane.showMessageDialog(frame, "Please enter text to generate a barcode.");
+                return;
+            }
+            for (char c : text.toCharArray()) {
+                if (c < 32 || c > 126) {
+                    JOptionPane.showMessageDialog(frame, "Only printable ASCII characters are supported.");
+                    return;
+                }
+            }
+            imgHolder[0] = BarcodeGenerator.generate(text, 2, 80);
+            canvas.repaint();
+        };
+        generateBtn.addActionListener(doGenerate);
+        inputField.addActionListener(doGenerate);
+
+        printBtn.addActionListener(e -> {
+            PrinterJob job = PrinterJob.getPrinterJob();
+            job.setPrintable((graphics, pageFormat, pageIndex) -> {
+                if (pageIndex > 0) return Printable.NO_SUCH_PAGE;
+                graphics.drawImage(imgHolder[0],
+                    (int) pageFormat.getImageableX(),
+                    (int) pageFormat.getImageableY(), null);
+                return Printable.PAGE_EXISTS;
+            });
+            if (job.printDialog()) {
+                try { job.print(); } catch (PrinterException ex) {
+                    JOptionPane.showMessageDialog(frame, "Print error: " + ex.getMessage());
+                }
+            }
+        });
+        closeBtn.addActionListener(e -> frame.dispose());
+
+        frame.add(headerPanel, BorderLayout.NORTH);
+        frame.add(inputPanel, BorderLayout.CENTER);
+        Panel centerPanel = new Panel(new BorderLayout());
+        centerPanel.setBackground(Color.WHITE);
+        centerPanel.add(canvas, BorderLayout.CENTER);
+        centerPanel.add(btnPanel, BorderLayout.SOUTH);
+        frame.add(centerPanel, BorderLayout.SOUTH);
+
+        frame.addWindowListener(new WindowAdapter() {
+            public void windowClosing(WindowEvent e) { frame.dispose(); }
+        });
+        frame.setLocationRelativeTo(parent);
+        frame.setVisible(true);
     }
 
     public static void main(String[] args) {
